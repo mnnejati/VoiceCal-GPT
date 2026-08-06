@@ -37,15 +37,68 @@ object PersianInfoExtractor {
 
     private val jalaliMonths = PersianCalendar.jalaliMonthNames
 
-    private val wordNumbers = mapOf(
-        "صفر" to 0, "یک" to 1, "دو" to 2, "سه" to 3, "چهار" to 4, "پنج" to 5,
-        "شش" to 6, "هفت" to 7, "هشت" to 8, "نه" to 9, "ده" to 10,
-        "یازده" to 11, "دوازده" to 12, "سیزده" to 13, "چهارده" to 14, "پانزده" to 15,
-        "شانزده" to 16, "هفده" to 17, "هجده" to 18, "نوزده" to 19, "بیست" to 20,
-        "بیست و یک" to 21, "بیست و دو" to 22, "بیست و سه" to 23, "بیست و چهار" to 24,
-        "بیست و پنج" to 25, "بیست و شش" to 26, "بیست و هفت" to 27, "بیست و هشت" to 28,
-        "بیست و نه" to 29, "سی" to 30, "سی و یک" to 31
-    )
+    private val wordNumbers = linkedMapOf(
+
+    "صفر" to 0,
+
+    "یک" to 1,
+    "یه" to 1,
+    "اول" to 1,
+
+    "دو" to 2,
+
+    "سه" to 3,
+
+    "چهار" to 4,
+
+    "پنج" to 5,
+
+    "شش" to 6,
+
+    "هفت" to 7,
+
+    "هشت" to 8,
+
+    "نه" to 9,
+
+    "ده" to 10,
+
+    "یازده" to 11,
+
+    "دوازده" to 12,
+
+    "سیزده" to 13,
+
+    "چهارده" to 14,
+
+    "پانزده" to 15,
+
+    "شانزده" to 16,
+
+    "هفده" to 17,
+
+    "هجده" to 18,
+
+    "نوزده" to 19,
+
+    "بیست" to 20,
+
+    "بیست و یک" to 21,
+    "بیست و دو" to 22,
+    "بیست و سه" to 23,
+    "بیست و چهار" to 24,
+    "بیست و پنج" to 25,
+    "بیست و شش" to 26,
+    "بیست و هفت" to 27,
+    "بیست و هشت" to 28,
+    "بیست و نه" to 29,
+
+    "سی" to 30,
+    "سی و یک" to 31,
+
+    "چهل" to 40,
+    "پنجاه" to 50
+  )
 
     // Ordinal day-of-month words: "هفتم شهریور" (the 7th of Shahrivar), "دوازدهم مرداد", etc.
     private val ordinalDayNumbers = mapOf(
@@ -59,9 +112,34 @@ object PersianInfoExtractor {
     )
 
     fun extract(text: String): ExtractedAppointment {
-        val normalized = normalizeDigits(text.trim())
+        //val normalized = normalizeDigits(text.trim())
+        val normalized = normalizeText(text.trim())
 
-        val person = extractAfterKeyword(normalized, listOf("با آقای", "با خانم", "با دکتر", "با"))
+        //val person = extractAfterKeyword(normalized, listOf("با آقای", "با خانم", "با دکتر", "با"))
+        val person =
+    extractAfterKeyword(
+        normalized,
+        listOf(
+
+            "با آقای",
+            "با خانم",
+            "با دکتر",
+
+            "پیش دکتر",
+            "پیش آقای",
+            "پیش خانم",
+
+            "نزد دکتر",
+            "نزد آقای",
+            "نزد خانم",
+
+            "ویزیت دکتر",
+            "نوبت دکتر",
+
+            "با"
+        ),
+        maxWords = 3
+    )
         val location = extractAfterKeyword(normalized, listOf("در محل", "در آدرس", "در"))
             ?: extractLocationAfterGoVerb(normalized)
 
@@ -333,5 +411,25 @@ object PersianInfoExtractor {
             }
         }
         return sb.toString()
+    }
+    
+    private fun normalizeText(input: String): String {
+
+    var s = normalizeDigits(input)
+
+    s = s.replace('ي', 'ی')
+    s = s.replace('ك', 'ک')
+
+    s = s.replace("سه شنبه","سه‌شنبه")
+    s = s.replace("پنج شنبه","پنج‌شنبه")
+    s = s.replace("پس فردا","پس‌فردا")
+
+    s = s.replace("دیگه","دیگر")
+    s = s.replace("بعدش","بعد")
+    s = s.replace("فرداش","فردا")
+
+    s = s.replace(Regex("\\s+")," ")
+
+    return s.trim()
     }
 }
