@@ -175,8 +175,16 @@ object PersianInfoExtractor {
             )
 
         val person =
-            improvedPerson
-                ?: oldPerson
+           PersonExtractor.extract(normalized)?.name
+              ?: extractAfterKeyword(
+                 normalized,
+                 listOf(
+                    "با آقای",
+                    "با خانم",
+                    "با دکتر",
+                    "با"
+                )
+             )
 
         // -------------------------------------------------------------
         // 2. LOCATION
