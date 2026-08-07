@@ -3,8 +3,9 @@ package ir.appointment.voice.voice
 import ir.appointment.voice.voice.extractor.DateExtractor
 import ir.appointment.voice.voice.extractor.TimeExtractor
 import ir.appointment.voice.voice.extractor.PersonExtractor
+import ir.appointment.voice.voice.normalizer.PersianNormalizer
 
-/** Result of extracting appointment info from a Persian utterance. */
+/** Result of extracting appointment information from Persian speech. */
 data class ExtractedAppointment(
     val rawText: String,
     val personName: String?,
@@ -23,14 +24,15 @@ data class ExtractedAppointment(
 /**
  * Main rule-based extractor for Persian appointment speech.
  *
- * Specialized extractors are used first:
+ * Extraction order:
  *
- *   DateExtractor
- *   TimeExtractor
+ *  1. Persian normalization
+ *  2. PersonExtractor
+ *  3. DateExtractor
+ *  4. TimeExtractor
+ *  5. Legacy fallback logic
  *
- * The older logic is retained as fallback so that introducing the
- * improved extractors does not reduce compatibility with existing
- * phrases.
+ * No ML model or external dependency is used here.
  */
 object PersianInfoExtractor {
 
@@ -63,8 +65,10 @@ object PersianInfoExtractor {
     private val jalaliMonths =
         PersianCalendar.jalaliMonthNames
 
-    /**
-     * Kept as fallback for compatibility with the old extractor.
+    /*
+     * Legacy number dictionary.
+     *
+     * Kept because the legacy date/time fallback still uses it.
      */
     private val wordNumbers = mapOf(
         "صفر" to 0,
@@ -138,53 +142,49 @@ object PersianInfoExtractor {
     )
 
     // =====================================================================
-    // MAIN
+    // MAIN EXTRACTION
     // =====================================================================
 
     fun extract(text: String): ExtractedAppointment {
 
+        /*
+         * First normalize the speech-recognition output.
+         *
+         * This keeps Persian/Arabic character variants, digits,
+         * spaces and common spoken forms consistent.
+         */
         val normalized =
-            normalizeText(text)
+            PersianNormalizer.normalize(text.trim())
 
         // -------------------------------------------------------------
         // 1. PERSON
         // -------------------------------------------------------------
 
         /*
-         * New person extractor is deliberately executed first.
+         * PersonExtractor is the primary person extractor.
          *
          * Examples:
          *
          *   نوبت دکتر احمدی دارم
-         *   فردا ساعت پنج دکتر احمدی
-         *   با دکتر احمدی قرار دارم
-         *   با علی قرار دارم
+         *   فردا ساعت پنج نوبت دکتر احمدی دارم
+         *   با دکتر محمدی قرار دارم
+         *   جلسه با مهندس رضایی دارم
          */
-        val improvedPerson =
-            extractPersonImproved(normalized)
-
-        val oldPerson =
-            extractAfterKeyword(
-                normalized,
-                listOf(
-                    "با آقای",
-                    "با خانم",
-                    "با دکتر",
-                    "با"
-                )
-            )
-
         val person =
-           PersonExtractor.extract(normalized)?.name
-              ?: extractAfterKeyword(
-                 normalized,
-                 listOf(
-                    "با آقای",
-                    "با خانم",
-                    "با دکتر",
-                    "با"
+            PersonExtractor
+                .extract(normalized)
+                ?.name
+                ?: extractAfterKeyword(
+                    normalized,
+                    listOf(
+                        "با آقای",
+                        "با خانم",
+                        "با دکتر",
+                        "با",
+                        "پیش دکتر",
+                        "نزد دکتر"
+                    )
                 )
-             )
 
         // -------------------------------------------------------------
         // 2. LOCATION
@@ -207,6 +207,9 @@ object PersianInfoExtractor {
         // 3. DATE
         // -------------------------------------------------------------
 
+        /*
+         * New DateExtractor has priority.
+         */
         val improvedDate =
             DateExtractor.extract(
                 normalized
@@ -234,8 +237,10 @@ object PersianInfoExtractor {
                 }
 
         /*
-         * Fallback to old date extraction if the new extractor
-         * could not resolve a date.
+         * Legacy date extraction remains as fallback.
+         *
+         * This is important for backward compatibility with phrases
+         * already supported by the previous application version.
          */
         if (
             improvedDate == null
@@ -254,13 +259,15 @@ object PersianInfoExtractor {
         }
 
         /*
-         * If year is missing but month/day exist, use current Jalali year.
+         * If month/day are known but year is missing,
+         * assume the current Jalali year.
          */
         if (
             jy == null &&
             jm != null &&
             jd != null
         ) {
+
             jy =
                 PersianCalendar
                     .todayJalali()
@@ -268,9 +275,8 @@ object PersianInfoExtractor {
         }
 
         /*
-         * If the improved extractor returned a relative expression
-         * such as "دو روز دیگه", keep its resolved date but generate
-         * a useful display string if necessary.
+         * Generate a display date if the extractor resolved the
+         * actual Jalali date but did not provide display text.
          */
         if (
             displayDate == null &&
@@ -278,6 +284,7 @@ object PersianInfoExtractor {
             jm != null &&
             jd != null
         ) {
+
             displayDate =
                 "$jd ${jalaliMonths.getOrNull(jm - 1) ?: ""} $jy"
         }
@@ -286,18 +293,27 @@ object PersianInfoExtractor {
         // 4. WEEKDAY
         // -------------------------------------------------------------
 
+        /*
+         * Prefer the weekday calculated from the resolved date.
+         *
+         * This prevents an incorrectly recognized weekday from
+         * overriding an otherwise correctly resolved date.
+         */
         val weekday =
             if (
                 jy != null &&
                 jm != null &&
                 jd != null
             ) {
+
                 PersianCalendar.weekdayName(
                     jy,
                     jm,
                     jd
                 ) ?: spokenWeekday
+
             } else {
+
                 spokenWeekday
             }
 
@@ -305,6 +321,9 @@ object PersianInfoExtractor {
         // 5. TIME
         // -------------------------------------------------------------
 
+        /*
+         * New TimeExtractor has priority.
+         */
         val improvedTime =
             TimeExtractor.extract(
                 normalized
@@ -320,7 +339,7 @@ object PersianInfoExtractor {
             improvedTime?.displayTime
 
         /*
-         * Old implementation remains as fallback.
+         * Legacy time extraction remains as fallback.
          */
         if (
             improvedTime == null
@@ -346,6 +365,7 @@ object PersianInfoExtractor {
                 jm != null &&
                 jd != null
             ) {
+
                 PersianCalendar.toEpochMillis(
                     jy,
                     jm,
@@ -353,7 +373,9 @@ object PersianInfoExtractor {
                     hour,
                     minute
                 )
+
             } else {
+
                 null
             }
 
@@ -371,184 +393,6 @@ object PersianInfoExtractor {
             displayTime = displayTime,
             sortTimestamp = sortTs
         )
-    }
-
-    // =====================================================================
-    // IMPROVED PERSON EXTRACTION
-    // =====================================================================
-
-    private fun extractPersonImproved(
-        text: String
-    ): String? {
-
-        /*
-         * Most specific patterns first.
-         *
-         * Example:
-         *
-         *   نوبت دکتر احمدی دارم
-         */
-        val doctorPatterns =
-            listOf(
-
-                Regex(
-                    """(?:نوبت|ویزیت|قرار)\s+(?:دکتر|دکترِ)\s+(.+?)(?=\s+(?:دارم|است|هست|داریم|میرم|می‌روم|خواهم|در|ساعت|روز|فردا|امروز|پس‌فردا)|$)"""
-                ),
-
-                Regex(
-                    """(?:با|پیش)\s+(?:دکتر|دکترِ)\s+(.+?)(?=\s+(?:قرار|نوبت|دارم|است|هست|داریم|میرم|می‌روم|خواهم|در|ساعت|روز|فردا|امروز|پس‌فردا)|$)"""
-                ),
-
-                Regex(
-                    """(?:دکتر|دکترِ)\s+(.+?)(?=\s+(?:دارم|است|هست|داریم|میرم|می‌روم|خواهم|در|ساعت|روز|فردا|امروز|پس‌فردا)|$)"""
-                )
-            )
-
-        for (
-            pattern in doctorPatterns
-        ) {
-
-            val match =
-                pattern.find(text)
-                    ?: continue
-
-            val name =
-                cleanPersonName(
-                    match.groupValues
-                        .getOrNull(1)
-                )
-
-            if (
-                !name.isNullOrBlank()
-            ) {
-                return "دکتر $name"
-            }
-        }
-
-        /*
-         * Normal "با شخص" patterns.
-         *
-         * Examples:
-         *
-         *   با علی قرار دارم
-         *   با محمد احمدی جلسه دارم
-         */
-        val normalPatterns =
-            listOf(
-
-                Regex(
-                    """(?:با|همراه)\s+(?:آقای|خانم)\s+(.+?)(?=\s+(?:قرار|نوبت|جلسه|دارم|است|هست|در|ساعت|روز|فردا|امروز)|$)"""
-                ),
-
-                Regex(
-                    """(?:با|همراه)\s+(.+?)(?=\s+(?:قرار|نوبت|جلسه|دارم|است|هست|در|ساعت|روز|فردا|امروز)|$)"""
-                )
-            )
-
-        for (
-            pattern in normalPatterns
-        ) {
-
-            val match =
-                pattern.find(text)
-                    ?: continue
-
-            val name =
-                cleanPersonName(
-                    match.groupValues
-                        .getOrNull(1)
-                )
-
-            if (
-                !name.isNullOrBlank()
-            ) {
-                return name
-            }
-        }
-
-        return null
-    }
-
-    private fun cleanPersonName(
-        value: String?
-    ): String? {
-
-        if (
-            value == null
-        ) {
-            return null
-        }
-
-        var name =
-            value.trim()
-
-        name =
-            name.trim(
-                ',',
-                '.',
-                '،',
-                '؛',
-                ':',
-                '!',
-                '?'
-            )
-
-        /*
-         * Remove obvious trailing words that can accidentally
-         * be captured by speech-recognition variations.
-         */
-        val stopWords =
-            setOf(
-                "دارم",
-                "است",
-                "هست",
-                "داریم",
-                "میرم",
-                "می‌روم",
-                "خواهم",
-                "قرار",
-                "نوبت",
-                "جلسه",
-                "ساعت",
-                "روز",
-                "فردا",
-                "امروز",
-                "پس‌فردا",
-                "در"
-            )
-
-        val words =
-            name.split(
-                Regex("\\s+")
-            )
-
-        val cleaned =
-            mutableListOf<String>()
-
-        for (
-            word in words
-        ) {
-
-            if (
-                stopWords.contains(word)
-            ) {
-                break
-            }
-
-            if (
-                word.isNotBlank()
-            ) {
-                cleaned.add(word)
-            }
-        }
-
-        if (
-            cleaned.isEmpty()
-        ) {
-            return null
-        }
-
-        return cleaned.joinToString(" ")
     }
 
     // =====================================================================
@@ -685,6 +529,13 @@ object PersianInfoExtractor {
         // Relative days
         // -------------------------------------------------------------
 
+        /*
+         * Supports:
+         *
+         *   2 روز بعد
+         *   2 روز دیگر
+         *   2 روز دیگه
+         */
         val digitRelativeRegex =
             Regex(
                 """(\d{1,3})\s*روز\s*(دیگه|دیگر|بعد)"""
@@ -726,6 +577,13 @@ object PersianInfoExtractor {
             }
         }
 
+        /*
+         * Word-number form:
+         *
+         *   دو روز بعد
+         *   دو روز دیگر
+         *   دو روز دیگه
+         */
         val wordRelativeRegex =
             Regex(
                 """(یک|دو|سه|چهار|پنج|شش|هفت|هشت|نه|ده)\s*روز\s*(دیگه|دیگر|بعد)"""
@@ -888,6 +746,10 @@ object PersianInfoExtractor {
                             7
                         ) % 7
 
+                /*
+                 * A weekday mentioned without another date means
+                 * the next occurrence of that weekday.
+                 */
                 if (
                     offset == 0
                 ) {
@@ -1042,9 +904,10 @@ object PersianInfoExtractor {
             hour += 12
         }
 
-        /*
-         * "ربع کم" / "کم ربع"
-         */
+        // -------------------------------------------------------------
+        // ربع کم / کم ربع
+        // -------------------------------------------------------------
+
         if (
             text.contains("ربع کم") ||
             text.contains("کم ربع")
@@ -1162,6 +1025,11 @@ object PersianInfoExtractor {
                     break
                 }
 
+                /*
+                 * Prevent false matches such as:
+                 *
+                 * "با" inside "باید"
+                 */
                 val precededByBoundary =
                     idx == 0 ||
                         text[idx - 1].isWhitespace()
@@ -1193,6 +1061,7 @@ object PersianInfoExtractor {
                                 "تاریخ",
                                 "فردا",
                                 "امروز",
+                                "امشب",
                                 "پس‌فردا",
                                 "پس",
                                 "دیگه",
@@ -1203,8 +1072,11 @@ object PersianInfoExtractor {
                                 "بروم",
                                 "میرم",
                                 "می‌روم",
+                                "می‌رم",
                                 "قراره",
                                 "قرار",
+                                "نوبت",
+                                "جلسه",
                                 "دارم",
                                 "است",
                                 "هست"
@@ -1228,7 +1100,9 @@ object PersianInfoExtractor {
                                     '.',
                                     '،',
                                     '؛',
-                                    ':'
+                                    ':',
+                                    '!',
+                                    '?'
                                 )
 
                             if (
@@ -1296,130 +1170,6 @@ object PersianInfoExtractor {
             goVerbs,
             maxWords = 2
         )
-    }
-
-    // =====================================================================
-    // NORMALIZATION
-    // =====================================================================
-
-    private fun normalizeText(
-        input: String
-    ): String {
-
-        var text =
-            normalizeDigits(
-                input.trim()
-            )
-
-        text =
-            text.replace(
-                'ي',
-                'ی'
-            )
-
-        text =
-            text.replace(
-                'ى',
-                'ی'
-            )
-
-        text =
-            text.replace(
-                'ك',
-                'ک'
-            )
-
-        text =
-            text.replace(
-                "پس فردا",
-                "پس‌فردا"
-            )
-
-        text =
-            text.replace(
-                "سه شنبه",
-                "سه‌شنبه"
-            )
-
-        text =
-            text.replace(
-                "پنج شنبه",
-                "پنجشنبه"
-            )
-
-        /*
-         * Normalize Arabic/other forms of "دیگه".
-         */
-        text =
-            text.replace(
-                "ديگه",
-                "دیگه"
-            )
-
-        /*
-         * Normalize ZWNJ to a space for regex matching.
-         * Keep the special "پس‌فردا" form above intact.
-         */
-        text =
-            text.replace(
-                '\u200C',
-                ' '
-            )
-
-        text =
-            text.replace(
-                Regex("\\s+"),
-                " "
-            )
-
-        return text.trim()
-    }
-
-    private fun normalizeDigits(
-        input: String
-    ): String {
-
-        val persianDigits =
-            "۰۱۲۳۴۵۶۷۸۹"
-
-        val arabicDigits =
-            "٠١٢٣٤٥٦٧٨٩"
-
-        val sb =
-            StringBuilder(
-                input.length
-            )
-
-        for (
-            ch in input
-        ) {
-
-            val pIdx =
-                persianDigits.indexOf(ch)
-
-            val aIdx =
-                arabicDigits.indexOf(ch)
-
-            when {
-
-                pIdx >= 0 ->
-                    sb.append(
-                        pIdx
-                    )
-
-                aIdx >= 0 ->
-                    sb.append(
-                        aIdx
-                    )
-
-                else ->
-                    sb.append(
-                        ch
-                    )
-            }
-        }
-
-        return sb.toString()
     }
 
     // =====================================================================
