@@ -39,6 +39,8 @@ object DateExtractor {
         mapOf(
             "شنبه" to 0,
             "یکشنبه" to 1,
+            "یشنبه" to 1,
+            "یک شنبه" to 1,
             "دوشنبه" to 2,
             "سه شنبه" to 3,
             "سه‌شنبه" to 3,
@@ -166,6 +168,28 @@ object DateExtractor {
         if (relativeResult != null) {
             return relativeResult
         }
+
+        /*
+         * -------------------------------------------------------------
+         * 4.5. SPECIAL RELATIVE PERIODS
+         *
+         * آخر هفته
+         * آخر ماه
+         * این هفته
+         * همین هفته
+         * هفته جاری
+         * هفته فعلی
+         * هفته آینده
+         * هفته بعد
+         * -------------------------------------------------------------
+         */
+        val specialPeriodResult =
+            extractSpecialRelativePeriod(text)
+
+        if (specialPeriodResult != null) {
+            return specialPeriodResult
+        }
+
 
         /*
          * -------------------------------------------------------------
@@ -554,6 +578,191 @@ object DateExtractor {
         return null
     }
 
+    
+    // =====================================================================
+    // SPECIAL RELATIVE PERIODS
+    // =====================================================================
+
+    private fun extractSpecialRelativePeriod(
+        text: String
+    ): Result? {
+
+        val today =
+            PersianCalendar.todayJalali()
+
+        val todayYear =
+            today.first
+
+        val todayMonth =
+            today.second
+
+        val todayDay =
+            today.third
+
+        // -------------------------------------------------------------
+        // آخر ماه / پایان ماه
+        //
+        // Example:
+        //   امروز: 15 مرداد
+        //   آخر ماه -> 31 مرداد
+        //
+        // For month 12:
+        //   29 or 30 depending on Jalali leap year.
+        // -------------------------------------------------------------
+
+        if (
+            text.contains("آخر ماه") ||
+            text.contains("پایان ماه")
+        ) {
+
+            val lastDay =
+                daysInJalaliMonth(
+                    todayYear,
+                    todayMonth
+                )
+
+            return makeResult(
+                year = todayYear,
+                month = todayMonth,
+                day = lastDay,
+                displayDate =
+                    "آخر ماه ${monthName(todayMonth)}"
+            )
+        }
+
+        // -------------------------------------------------------------
+        // آخر هفته / پایان هفته
+        //
+        // Jalali week:
+        //
+        // شنبه    = 0
+        // یکشنبه  = 1
+        // دوشنبه  = 2
+        // سه شنبه = 3
+        // چهارشنبه= 4
+        // پنجشنبه = 5
+        // جمعه    = 6
+        //
+        // Therefore "آخر هفته" means Friday of the current week.
+        // -------------------------------------------------------------
+
+        if (
+            text.contains("آخر هفته") ||
+            text.contains("پایان هفته")
+        ) {
+
+            val todayName =
+                PersianCalendar.weekdayName(
+                    todayYear,
+                    todayMonth,
+                    todayDay
+                )
+
+            val todayIndex =
+                weekdayIndex[todayName]
+                    ?: return null
+
+            val daysUntilFriday =
+                6 - todayIndex
+
+            return shiftFromToday(
+                offset = daysUntilFriday,
+                display = "آخر هفته"
+            )
+        }
+
+        // -------------------------------------------------------------
+        // Current week
+        //
+        // این هفته
+        // همین هفته
+        // هفته جاری
+        // هفته فعلی
+        //
+        // A bare "current week" does not contain a specific day.
+        // We therefore do not manufacture an appointment date here.
+        //
+        // It becomes useful when combined with a weekday, e.g.:
+        //
+        //   این هفته جمعه
+        //   همین هفته سه شنبه
+        //
+        // The weekday extractor will handle those cases.
+        // -------------------------------------------------------------
+
+        if (
+            text.contains("این هفته") ||
+            text.contains("همین هفته") ||
+            text.contains("هفته جاری") ||
+            text.contains("هفته فعلی")
+        ) {
+
+            val weekdayResult =
+                extractWeekdayWithWeekQualifier(
+                    text,
+                    weekOffset = 0
+                )
+
+            if (weekdayResult != null) {
+                return weekdayResult
+            }
+
+            /*
+             * There is no specific day in phrases such as:
+             *
+             *   "این هفته"
+             *   "همین هفته"
+             *
+             * Do not incorrectly assign today's date.
+             */
+            return null
+        }
+
+        // -------------------------------------------------------------
+        // Next week
+        //
+        // هفته آینده
+        // هفته بعد
+        // هفته بعدی
+        //
+        // If a weekday exists:
+        //
+        //   هفته آینده سه شنبه
+        //
+        // resolve that exact weekday in next week.
+        // -------------------------------------------------------------
+
+        if (
+            text.contains("هفته آینده") ||
+            text.contains("هفته بعد") ||
+            text.contains("هفته بعدی")
+        ) {
+
+            val weekdayResult =
+                extractWeekdayWithWeekQualifier(
+                    text,
+                    weekOffset = 1
+                )
+
+            if (weekdayResult != null) {
+                return weekdayResult
+            }
+
+            /*
+             * A bare "هفته بعد" does not specify a day.
+             * We use the first day of next week (Saturday) as a
+             * deterministic fallback.
+             */
+            return shiftFromToday(
+                offset =
+                    daysUntilNextSaturday(today),
+                display = "هفته بعد"
+            )
+        }
+
+        return null
+    }
+
     // =====================================================================
     // SIMPLE RELATIVE DATE
     // =====================================================================
@@ -689,9 +898,188 @@ object DateExtractor {
     }
 
     // =====================================================================
-    // DATE SHIFT
+    // WEEK QUALIFIED WEEKDAY
     // =====================================================================
 
+    private fun extractWeekdayWithWeekQualifier(
+        text: String,
+        weekOffset: Int
+    ): Result? {
+
+        val normalizedText =
+            text
+                .replace(
+                    "یشنبه",
+                    "یکشنبه"
+                )
+                .replace(
+                    "یک شنبه",
+                    "یکشنبه"
+                )
+                .replace(
+                    "سه شنبه",
+                    "سه‌شنبه"
+                )
+                .replace(
+                    "پنج شنبه",
+                    "پنجشنبه"
+                )
+
+        val weekday =
+            weekdayIndex.keys
+                .sortedByDescending {
+                    it.length
+                }
+                .firstOrNull {
+                    containsWord(
+                        normalizedText,
+                        it
+                    )
+                }
+                ?: return null
+
+        val targetIndex =
+            weekdayIndex[weekday]
+                ?: return null
+
+        val today =
+            PersianCalendar.todayJalali()
+
+        val todayName =
+            PersianCalendar.weekdayName(
+                today.first,
+                today.second,
+                today.third
+            )
+
+        val todayIndex =
+            weekdayIndex[todayName]
+                ?: return null
+
+        /*
+         * Find the beginning of the current Jalali week.
+         *
+         * Saturday = 0
+         */
+        val daysFromWeekStart =
+            todayIndex
+
+        /*
+         * Move to the beginning of the requested week.
+         *
+         * weekOffset:
+         *
+         * 0 = current week
+         * 1 = next week
+         */
+        val daysToTarget =
+            (
+                weekOffset * 7
+            ) -
+                daysFromWeekStart +
+                targetIndex
+
+        /*
+         * For "این هفته سه شنبه", if today is already after
+         * Tuesday, the phrase still refers to the current week's
+         * Tuesday rather than next Tuesday.
+         */
+        return shiftFromToday(
+            offset = daysToTarget,
+            display =
+                if (weekOffset == 0) {
+                    weekday
+                } else {
+                    "$weekday هفته بعد"
+                }
+        )
+    }
+
+
+    // =====================================================================
+    // NEXT SATURDAY
+    // =====================================================================
+
+    private fun daysUntilNextSaturday(
+        today: Triple<Int, Int, Int>
+    ): Int {
+
+        val todayName =
+            PersianCalendar.weekdayName(
+                today.first,
+                today.second,
+                today.third
+            )
+
+        val todayIndex =
+            weekdayIndex[todayName]
+                ?: return 7
+
+        /*
+         * Saturday = 0.
+         *
+         * If today is Saturday, "هفته بعد" means the Saturday
+         * seven days later.
+         */
+        return if (todayIndex == 0) {
+            7
+        } else {
+            7 - todayIndex
+        }
+    }
+
+
+    // =====================================================================
+    // JALALI MONTH LENGTH
+    // =====================================================================
+
+    private fun daysInJalaliMonth(
+        year: Int,
+        month: Int
+    ): Int {
+
+        /*
+         * Farvardin through Shahrivar:
+         * 31 days
+         */
+        if (month in 1..6) {
+            return 31
+        }
+
+        /*
+         * Mehr through Bahman:
+         * 30 days
+         */
+        if (month in 7..11) {
+            return 30
+        }
+
+        /*
+         * Esfand:
+         *
+         * 29 days in normal years
+         * 30 days in leap years
+         *
+         * Instead of implementing another leap-year algorithm,
+         * validate day 30 using the existing Jalali calendar.
+         */
+        return if (
+            isValidDate(
+                year,
+                12,
+                30
+            )
+        ) {
+            30
+        } else {
+            29
+        }
+    }
+
+    // =====================================================================
+    // DATE SHIFT
+    // =====================================================================
+    
     private fun shiftFromToday(
         offset: Int,
         display: String
@@ -937,6 +1325,14 @@ object DateExtractor {
             .replace(
                 "پنج شنبه",
                 "پنجشنبه"
+            )
+            .replace(
+                "یشنبه",
+                "یکشنبه"
+            )
+            .replace(
+                "یک شنبه",
+                "یکشنبه"
             )
 
         /*
