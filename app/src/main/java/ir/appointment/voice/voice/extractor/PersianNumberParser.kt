@@ -25,7 +25,6 @@ object PersianNumberParser {
         "یک" to 1,
         "یه" to 1,
         "اول" to 1,
-
         "دو" to 2,
         "سه" to 3,
         "چهار" to 4,
@@ -68,8 +67,10 @@ object PersianNumberParser {
     private val hundreds = mapOf(
         "صد" to 100,
         "دویست" to 200,
+        "دیویست" to 200,
         "سیصد" to 300,
         "چهارصد" to 400,
+        "چارصد" to 400,
         "پانصد" to 500,
         "پونصد" to 500,
         "ششصد" to 600,
