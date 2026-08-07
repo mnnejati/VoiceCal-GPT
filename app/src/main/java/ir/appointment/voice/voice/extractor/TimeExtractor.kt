@@ -1,762 +1,821 @@
 package ir.appointment.voice.voice.extractor
 
 /**
- * Extracts time expressions from Persian speech.
+ * Persian speech time extractor.
  *
- * Examples:
+ * Supports:
  *
- *   ساعت 5
- *   ساعت ۵
  *   ساعت پنج
  *   ساعت پنج و نیم
  *   ساعت پنج و ربع
- *   پنج و نیم
- *   پنج و ربع
- *   ربع به پنج
- *   پنج ربع کم
- *   بیست دقیقه به پنج
- *   ده دقیقه بعد از پنج
- *   ساعت 17:30
- *   ساعت ۱۷:۳۰
+ *   ساعت پنج و بیست دقیقه
+ *   ساعت پنج و سی دقیقه
+ *   ساعت ۵
+ *   ساعت ۵:۳۰
  *   پنج عصر
- *   پنج بعد از ظهر
- *   هشت صبح
- *   دوازده ظهر
- *   دوازده شب
- *
- * This class is completely rule-based and does not require
- * any additional ML model or Android dependency.
+ *   پنج بعدازظهر
+ *   پنج شب
+ *   ربع به پنج
+ *   ربع مانده به پنج
+ *   ده دقیقه به پنج
+ *   بیست دقیقه به پنج
+ *   ده دقیقه از پنج گذشته
  */
 object TimeExtractor {
 
     data class Result(
         val hour: Int,
         val minute: Int,
-        val displayTime: String,
-        val confidence: Int
+        val displayTime: String
     )
 
-    // ---------------------------------------------------------------------
-    // Main extraction
-    // ---------------------------------------------------------------------
+    /**
+     * Main extraction function.
+     */
+    fun extract(
+        input: String
+    ): Result? {
 
-    fun extract(text: String): Result? {
+        val text =
+            normalize(input)
 
-        val normalized = normalize(text)
-
-        if (normalized.isEmpty()) {
+        if (text.isEmpty()) {
             return null
         }
 
         /*
-         * Highest priority:
+         * -------------------------------------------------------------
+         * 1. Explicit HH:MM
+         * -------------------------------------------------------------
+         *
+         * Examples:
          *
          * 17:30
-         * 17٫30
-         * ساعت 17:30
+         * ۵:۳۰
          */
-        extractColonTime(normalized)?.let {
-            return applyDayPeriod(
-                it.hour,
-                it.minute,
-                normalized,
-                it.confidence
-            )
+        extractColonTime(text)?.let {
+            return it
         }
 
         /*
-         * "بیست دقیقه به پنج"
+         * -------------------------------------------------------------
+         * 2. "ربع به پنج"
+         * -------------------------------------------------------------
+         */
+        extractQuarterTo(text)?.let {
+            return it
+        }
+
+        /*
+         * -------------------------------------------------------------
+         * 3. "ربع مانده به پنج"
+         * -------------------------------------------------------------
+         */
+        extractQuarterRemainingTo(text)?.let {
+            return it
+        }
+
+        /*
+         * -------------------------------------------------------------
+         * 4. "ده دقیقه به پنج"
+         * -------------------------------------------------------------
+         */
+        extractMinutesTo(text)?.let {
+            return it
+        }
+
+        /*
+         * -------------------------------------------------------------
+         * 5. "ده دقیقه از پنج گذشته"
+         * -------------------------------------------------------------
+         */
+        extractMinutesPast(text)?.let {
+            return it
+        }
+
+        /*
+         * -------------------------------------------------------------
+         * 6. "پنج و نیم"
          *
-         * This must be checked before the simpler
-         * "پنج" patterns.
+         * Must be checked before normal hour extraction.
+         * -------------------------------------------------------------
          */
-        extractMinutesBeforeHour(normalized)?.let {
-            return applyDayPeriod(
-                it.hour,
-                it.minute,
-                normalized,
-                it.confidence
-            )
+        extractHalf(text)?.let {
+            return it
         }
 
         /*
-         * "ده دقیقه بعد از پنج"
+         * -------------------------------------------------------------
+         * 7. "پنج و ربع"
+         * -------------------------------------------------------------
          */
-        extractMinutesAfterHour(normalized)?.let {
-            return applyDayPeriod(
-                it.hour,
-                it.minute,
-                normalized,
-                it.confidence
-            )
+        extractQuarter(text)?.let {
+            return it
         }
 
         /*
-         * "ربع به پنج"
-         *
-         * = 04:45
+         * -------------------------------------------------------------
+         * 8. "پنج و بیست دقیقه"
+         * -------------------------------------------------------------
          */
-        extractQuarterTo(normalized)?.let {
-            return applyDayPeriod(
-                it.hour,
-                it.minute,
-                normalized,
-                it.confidence
-            )
+        extractHourAndMinutes(text)?.let {
+            return it
         }
 
         /*
-         * "پنج ربع کم"
-         *
-         * = 04:45
-         */
-        extractHourQuarterLess(normalized)?.let {
-            return applyDayPeriod(
-                it.hour,
-                it.minute,
-                normalized,
-                it.confidence
-            )
-        }
-
-        /*
-         * "پنج و نیم"
-         * "ساعت پنج و نیم"
-         */
-        extractHourAndHalf(normalized)?.let {
-            return applyDayPeriod(
-                it.hour,
-                it.minute,
-                normalized,
-                it.confidence
-            )
-        }
-
-        /*
-         * "پنج و ربع"
-         * "ساعت پنج و ربع"
-         */
-        extractHourAndQuarter(normalized)?.let {
-            return applyDayPeriod(
-                it.hour,
-                it.minute,
-                normalized,
-                it.confidence
-            )
-        }
-
-        /*
-         * "پنج و بیست"
-         * "ساعت پنج و بیست"
-         *
-         * Also supports:
-         * "پنج و بیست و پنج"
-         */
-        extractHourAndMinuteWords(normalized)?.let {
-            return applyDayPeriod(
-                it.hour,
-                it.minute,
-                normalized,
-                it.confidence
-            )
-        }
-
-        /*
-         * "ساعت پنج"
-         * "ساعت 5"
-         */
-        extractHourAfterSaaat(normalized)?.let {
-            return applyDayPeriod(
-                it.hour,
-                it.minute,
-                normalized,
-                it.confidence
-            )
-        }
-
-        /*
-         * Finally, allow a bare hour:
-         *
+         * -------------------------------------------------------------
+         * 9. "ساعت پنج عصر"
          * "پنج عصر"
-         * "هشت صبح"
-         * "نه شب"
-         *
-         * We intentionally do NOT accept a random bare number
-         * without a time context, because this creates many
-         * false positives.
+         * -------------------------------------------------------------
          */
-        extractBareHourWithContext(normalized)?.let {
-            return applyDayPeriod(
-                it.hour,
-                it.minute,
-                normalized,
-                it.confidence
+        extractHourWithPeriod(text)?.let {
+            return it
+        }
+
+        /*
+         * -------------------------------------------------------------
+         * 10. "ساعت پنج"
+         * -------------------------------------------------------------
+         */
+        extractSimpleHour(text)?.let {
+            return it
+        }
+
+        return null
+    }
+
+    // =====================================================================
+    // HH:MM
+    // =====================================================================
+
+    private fun extractColonTime(
+        text: String
+    ): Result? {
+
+        val regex =
+            Regex(
+                """(?<!\d)(\d{1,2})\s*:\s*(\d{1,2})(?!\d)"""
+            )
+
+        val match =
+            regex.find(text)
+                ?: return null
+
+        val hour =
+            match.groupValues[1]
+                .toIntOrNull()
+                ?: return null
+
+        val minute =
+            match.groupValues[2]
+                .toIntOrNull()
+                ?: return null
+
+        if (
+            hour !in 0..23 ||
+            minute !in 0..59
+        ) {
+            return null
+        }
+
+        return makeResult(
+            hour,
+            minute
+        )
+    }
+
+    // =====================================================================
+    // QUARTER TO
+    // =====================================================================
+
+    private fun extractQuarterTo(
+        text: String
+    ): Result? {
+
+        val patterns =
+            listOf(
+                "ربع به",
+                "یک ربع به",
+                "یه ربع به"
+            )
+
+        for (pattern in patterns) {
+
+            val index =
+                text.indexOf(pattern)
+
+            if (index < 0) {
+                continue
+            }
+
+            val after =
+                text.substring(
+                    index + pattern.length
+                ).trim()
+
+            val hour =
+                extractFirstHour(
+                    after
+                )
+                    ?: continue
+
+            return subtractMinutes(
+                hour = hour,
+                minute = 0,
+                minutes = 15
             )
         }
 
         return null
     }
 
-    // ---------------------------------------------------------------------
-    // Numeric clock time
-    // ---------------------------------------------------------------------
+    // =====================================================================
+    // QUARTER REMAINING TO
+    // =====================================================================
 
-    private fun extractColonTime(
+    private fun extractQuarterRemainingTo(
         text: String
-    ): RawResult? {
+    ): Result? {
 
-        /*
-         * Examples:
-         *
-         * 17:30
-         * 17٫30
-         * ساعت 17:30
-         * ساعت ۱۷:۳۰
-         */
-        val regex = Regex(
-            """(?:ساعت\s*)?\b(\d{1,2})\s*[:٫]\s*(\d{1,2})\b"""
-        )
+        val patterns =
+            listOf(
+                "ربع مانده به",
+                "یک ربع مانده به",
+                "یه ربع مانده به"
+            )
 
-        val match = regex.find(text)
-            ?: return null
+        for (pattern in patterns) {
+
+            val index =
+                text.indexOf(pattern)
+
+            if (index < 0) {
+                continue
+            }
+
+            val after =
+                text.substring(
+                    index + pattern.length
+                ).trim()
+
+            val hour =
+                extractFirstHour(
+                    after
+                )
+                    ?: continue
+
+            return subtractMinutes(
+                hour = hour,
+                minute = 0,
+                minutes = 15
+            )
+        }
+
+        return null
+    }
+
+    // =====================================================================
+    // MINUTES TO
+    // =====================================================================
+
+    private fun extractMinutesTo(
+        text: String
+    ): Result? {
+
+        val numberPattern =
+            PersianNumberParser
+                .numberPattern()
+
+        val regex =
+            Regex(
+                """($numberPattern)\s+دقیقه\s+(?:به|مانده به)\s+(.+)"""
+            )
+
+        val match =
+            regex.find(text)
+                ?: return null
+
+        val minuteText =
+            match.groupValues[1]
+
+        val hourText =
+            match.groupValues[2]
+
+        val minutes =
+            PersianNumberParser.parseInRange(
+                minuteText,
+                1,
+                59
+            )
+                ?: return null
 
         val hour =
-            match.groupValues[1].toIntOrNull()
+            extractFirstHour(
+                hourText
+            )
+                ?: return null
+
+        return subtractMinutes(
+            hour = hour,
+            minute = 0,
+            minutes = minutes
+        )
+    }
+
+    // =====================================================================
+    // MINUTES PAST
+    // =====================================================================
+
+    private fun extractMinutesPast(
+        text: String
+    ): Result? {
+
+        val numberPattern =
+            PersianNumberParser
+                .numberPattern()
+
+        val regex =
+            Regex(
+                """($numberPattern)\s+دقیقه\s+از\s+(.+?)\s+(?:گذشته|رد شده)"""
+            )
+
+        val match =
+            regex.find(text)
+                ?: return null
+
+        val minuteText =
+            match.groupValues[1]
+
+        val hourText =
+            match.groupValues[2]
+
+        val minutes =
+            PersianNumberParser.parseInRange(
+                minuteText,
+                1,
+                59
+            )
+                ?: return null
+
+        val hour =
+            extractFirstHour(
+                hourText
+            )
+                ?: return null
+
+        return addMinutes(
+            hour = hour,
+            minute = 0,
+            minutes = minutes
+        )
+    }
+
+    // =====================================================================
+    // HALF
+    // =====================================================================
+
+    private fun extractHalf(
+        text: String
+    ): Result? {
+
+        val numberPattern =
+            PersianNumberParser
+                .numberPattern()
+
+        val regex =
+            Regex(
+                """(?:ساعت\s+)?($numberPattern)\s+و\s+(?:نیم|نیمه)"""
+            )
+
+        val match =
+            regex.find(text)
+                ?: return null
+
+        val hour =
+            PersianNumberParser.parseInRange(
+                match.groupValues[1],
+                0,
+                23
+            )
+                ?: return null
+
+        return makeResult(
+            hour = hour,
+            minute = 30
+        )
+    }
+
+    // =====================================================================
+    // QUARTER
+    // =====================================================================
+
+    private fun extractQuarter(
+        text: String
+    ): Result? {
+
+        val numberPattern =
+            PersianNumberParser
+                .numberPattern()
+
+        val regex =
+            Regex(
+                """(?:ساعت\s+)?($numberPattern)\s+و\s+(?:یک\s+)?ربع"""
+            )
+
+        val match =
+            regex.find(text)
+                ?: return null
+
+        val hour =
+            PersianNumberParser.parseInRange(
+                match.groupValues[1],
+                0,
+                23
+            )
+                ?: return null
+
+        return makeResult(
+            hour = hour,
+            minute = 15
+        )
+    }
+
+    // =====================================================================
+    // HOUR + MINUTES
+    // =====================================================================
+
+    private fun extractHourAndMinutes(
+        text: String
+    ): Result? {
+
+        val numberPattern =
+            PersianNumberParser
+                .numberPattern()
+
+        val regex =
+            Regex(
+                """(?:ساعت\s+)?($numberPattern)\s+و\s+($numberPattern)\s+دقیقه"""
+            )
+
+        val match =
+            regex.find(text)
+                ?: return null
+
+        val hour =
+            PersianNumberParser.parseInRange(
+                match.groupValues[1],
+                0,
+                23
+            )
                 ?: return null
 
         val minute =
-            match.groupValues[2].toIntOrNull()
+            PersianNumberParser.parseInRange(
+                match.groupValues[2],
+                0,
+                59
+            )
                 ?: return null
 
-        if (!isValidHour(hour)) return null
-        if (!isValidMinute(minute)) return null
-
-        return RawResult(
-            hour = hour,
-            minute = minute,
-            confidence = 100
+        return makeResult(
+            hour,
+            minute
         )
     }
 
-    // ---------------------------------------------------------------------
-    // "بیست دقیقه به پنج"
-    // ---------------------------------------------------------------------
+    // =====================================================================
+    // HOUR + AM/PM PERIOD
+    // =====================================================================
 
-    private fun extractMinutesBeforeHour(
+    private fun extractHourWithPeriod(
         text: String
-    ): RawResult? {
+    ): Result? {
 
-        val minutePattern =
-            "(\\d{1,2}|${numberWordsPattern()})"
+        val numberPattern =
+            PersianNumberParser
+                .numberPattern()
 
-        val hourPattern =
-            "(\\d{1,2}|${hourWordsPattern()})"
-
-        val regex = Regex(
-            """$minutePattern\s+دقیقه\s+(?:به|مونده\s+به|مانده\s+به)\s+$hourPattern"""
-        )
+        val regex =
+            Regex(
+                """(?:ساعت\s+)?($numberPattern)\s+(صبح|ظهر|عصر|بعدازظهر|بعد از ظهر|شب|بامداد)"""
+            )
 
         val match =
             regex.find(text)
                 ?: return null
 
-        val minutes =
-            parseNumber(match.groupValues[1])
+        var hour =
+            PersianNumberParser.parseInRange(
+                match.groupValues[1],
+                0,
+                23
+            )
                 ?: return null
 
-        val hour =
-            parseNumber(match.groupValues[2])
-                ?: return null
+        val period =
+            match.groupValues[2]
 
-        if (hour !in 1..12) return null
-        if (minutes !in 1..59) return null
+        hour =
+            when (period) {
 
-        val resultHour =
-            if (hour == 1) 0 else hour - 1
+                "صبح",
+                "بامداد" -> {
 
-        val resultMinute =
-            60 - minutes
+                    /*
+                     * 12 صبح = 00:00
+                     */
+                    if (hour == 12) {
+                        0
+                    } else {
+                        hour
+                    }
+                }
 
-        return RawResult(
-            hour = resultHour,
-            minute = resultMinute,
-            confidence = 96
+                "ظهر" -> {
+
+                    /*
+                     * 12 ظهر = 12:00
+                     * 1 ظهر = 13:00
+                     */
+                    if (hour in 1..11) {
+                        hour + 12
+                    } else {
+                        hour
+                    }
+                }
+
+                "عصر",
+                "بعدازظهر",
+                "بعد از ظهر",
+                "شب" -> {
+
+                    /*
+                     * 12 شب = 00:00
+                     * 1 شب = 01:00
+                     *
+                     * For 1..11, interpret as PM except
+                     * when the user explicitly says "شب".
+                     */
+                    when {
+                        period == "شب" &&
+                                hour in 1..5 ->
+                            hour
+
+                        hour in 1..11 ->
+                            hour + 12
+
+                        else ->
+                            hour
+                    }
+                }
+
+                else ->
+                    hour
+            }
+
+        if (
+            hour !in 0..23
+        ) {
+            return null
+        }
+
+        return makeResult(
+            hour,
+            0
         )
     }
 
-    // ---------------------------------------------------------------------
-    // "ده دقیقه بعد از پنج"
-    // ---------------------------------------------------------------------
+    // =====================================================================
+    // SIMPLE HOUR
+    // =====================================================================
 
-    private fun extractMinutesAfterHour(
+    private fun extractSimpleHour(
         text: String
-    ): RawResult? {
+    ): Result? {
 
-        val minutePattern =
-            "(\\d{1,2}|${numberWordsPattern()})"
-
-        val hourPattern =
-            "(\\d{1,2}|${hourWordsPattern()})"
-
-        val regex = Regex(
-            """$minutePattern\s+دقیقه\s+(?:بعد\s+از|بعداز)\s+$hourPattern"""
-        )
-
-        val match =
-            regex.find(text)
-                ?: return null
-
-        val minutes =
-            parseNumber(match.groupValues[1])
-                ?: return null
-
-        val hour =
-            parseNumber(match.groupValues[2])
-                ?: return null
-
-        if (hour !in 0..23) return null
-        if (minutes !in 1..59) return null
-
-        val totalMinutes =
-            hour * 60 + minutes
-
-        val resultHour =
-            (totalMinutes / 60) % 24
-
-        val resultMinute =
-            totalMinutes % 60
-
-        return RawResult(
-            hour = resultHour,
-            minute = resultMinute,
-            confidence = 94
-        )
-    }
-
-    // ---------------------------------------------------------------------
-    // "ربع به پنج"
-    // ---------------------------------------------------------------------
-
-    private fun extractQuarterTo(
-        text: String
-    ): RawResult? {
-
-        val hourPattern =
-            "(\\d{1,2}|${hourWordsPattern()})"
-
-        val regex = Regex(
-            """(?:ربع|یک\s+ربع)\s+(?:به|مونده\s+به|مانده\s+به)\s+$hourPattern"""
-        )
-
-        val match =
-            regex.find(text)
-                ?: return null
-
-        val hour =
-            parseNumber(match.groupValues[1])
-                ?: return null
-
-        if (hour !in 1..12) return null
-
-        val resultHour =
-            if (hour == 1) 0 else hour - 1
-
-        return RawResult(
-            hour = resultHour,
-            minute = 45,
-            confidence = 97
-        )
-    }
-
-    // ---------------------------------------------------------------------
-    // "پنج ربع کم"
-    // ---------------------------------------------------------------------
-
-    private fun extractHourQuarterLess(
-        text: String
-    ): RawResult? {
-
-        val hourPattern =
-            "(\\d{1,2}|${hourWordsPattern()})"
-
-        val regex = Regex(
-            """$hourPattern\s+(?:ربع\s+کم|کم\s+ربع)"""
-        )
-
-        val match =
-            regex.find(text)
-                ?: return null
-
-        val hour =
-            parseNumber(match.groupValues[1])
-                ?: return null
-
-        if (hour !in 1..12) return null
-
-        return RawResult(
-            hour = if (hour == 1) 0 else hour - 1,
-            minute = 45,
-            confidence = 96
-        )
-    }
-
-    // ---------------------------------------------------------------------
-    // "پنج و نیم"
-    // ---------------------------------------------------------------------
-
-    private fun extractHourAndHalf(
-        text: String
-    ): RawResult? {
-
-        val hourPattern =
-            "(\\d{1,2}|${hourWordsPattern()})"
-
-        val regex = Regex(
-            """(?:ساعت\s+)?$hourPattern\s+و\s+(?:نیم|نصف)"""
-        )
-
-        val match =
-            regex.find(text)
-                ?: return null
-
-        val hour =
-            parseNumber(match.groupValues[1])
-                ?: return null
-
-        if (hour !in 0..23) return null
-
-        return RawResult(
-            hour = hour,
-            minute = 30,
-            confidence = 98
-        )
-    }
-
-    // ---------------------------------------------------------------------
-    // "پنج و ربع"
-    // ---------------------------------------------------------------------
-
-    private fun extractHourAndQuarter(
-        text: String
-    ): RawResult? {
-
-        val hourPattern =
-            "(\\d{1,2}|${hourWordsPattern()})"
-
-        val regex = Regex(
-            """(?:ساعت\s+)?$hourPattern\s+و\s+(?:یک\s+)?ربع"""
-        )
-
-        val match =
-            regex.find(text)
-                ?: return null
-
-        val hour =
-            parseNumber(match.groupValues[1])
-                ?: return null
-
-        if (hour !in 0..23) return null
-
-        return RawResult(
-            hour = hour,
-            minute = 15,
-            confidence = 98
-        )
-    }
-
-    // ---------------------------------------------------------------------
-    // "پنج و بیست"
-    // "پنج و بیست و پنج"
-    // ---------------------------------------------------------------------
-
-    private fun extractHourAndMinuteWords(
-        text: String
-    ): RawResult? {
-
-        val hourPattern =
-            "(${hourWordsPattern()})"
-
-        val minutePattern =
-            "(${minuteWordsPattern()})"
+        val numberPattern =
+            PersianNumberParser
+                .hourPattern()
 
         /*
-         * First try:
-         *
-         * پنج و بیست و پنج
+         * Prefer "ساعت X".
          */
-        val regexWithCompositeMinute = Regex(
-            """(?:ساعت\s+)?$hourPattern\s+و\s+$minutePattern\s+و\s+(${
-                minuteWordsPattern()
-            })"""
-        )
+        val withSaaat =
+            Regex(
+                """ساعت\s+($numberPattern)(?!\s+(?:و|نیم|ربع|دقیقه))"""
+            )
 
-        val composite =
-            regexWithCompositeMinute.find(text)
+        val match =
+            withSaaat.find(text)
 
-        if (composite != null) {
+        if (match != null) {
 
             val hour =
-                parseNumber(composite.groupValues[1])
-                    ?: return null
+                PersianNumberParser.parseInRange(
+                    match.groupValues[1],
+                    0,
+                    23
+                )
 
-            val tens =
-                parseNumber(composite.groupValues[2])
-                    ?: return null
-
-            val ones =
-                parseNumber(composite.groupValues[3])
-                    ?: return null
-
-            val minute =
-                tens + ones
-
-            if (
-                hour in 0..23 &&
-                minute in 0..59
-            ) {
-                return RawResult(
-                    hour = hour,
-                    minute = minute,
-                    confidence = 93
+            if (hour != null) {
+                return makeResult(
+                    hour,
+                    0
                 )
             }
         }
 
         /*
-         * "پنج و بیست"
-         */
-        val simpleRegex = Regex(
-            """(?:ساعت\s+)?$hourPattern\s+و\s+$minutePattern"""
-        )
-
-        val match =
-            simpleRegex.find(text)
-                ?: return null
-
-        val hour =
-            parseNumber(match.groupValues[1])
-                ?: return null
-
-        val minute =
-            parseNumber(match.groupValues[2])
-                ?: return null
-
-        if (hour !in 0..23) return null
-        if (minute !in 0..59) return null
-
-        return RawResult(
-            hour = hour,
-            minute = minute,
-            confidence = 92
-        )
-    }
-
-    // ---------------------------------------------------------------------
-    // "ساعت پنج"
-    // ---------------------------------------------------------------------
-
-    private fun extractHourAfterSaaat(
-        text: String
-    ): RawResult? {
-
-        /*
-         * Numeric:
+         * Fallback for:
          *
-         * ساعت 5
+         * "فردا پنج قرار دارم"
+         *
+         * This is intentionally conservative. We only accept a
+         * bare hour when it appears in an appointment-like context.
          */
-        val numericRegex = Regex(
-            """\bساعت\s+(\d{1,2})\b"""
-        )
-
-        val numeric =
-            numericRegex.find(text)
-
-        if (numeric != null) {
-
-            val hour =
-                numeric.groupValues[1].toIntOrNull()
-                    ?: return null
-
-            if (!isValidHour(hour)) {
-                return null
-            }
-
-            return RawResult(
-                hour = hour,
-                minute = 0,
-                confidence = 96
+        val appointmentContext =
+            listOf(
+                "قرار",
+                "نوبت",
+                "وقت",
+                "جلسه",
+                "ملاقات",
+                "ویزیت",
+                "دارم",
+                "می‌روم",
+                "میرم"
             )
-        }
 
-        /*
-         * Word:
-         *
-         * ساعت پنج
-         * ساعت یازده
-         * ساعت دوازده
-         */
-        val wordRegex = Regex(
-            """\bساعت\s+(${hourWordsPattern()})\b"""
-        )
-
-        val word =
-            wordRegex.find(text)
-                ?: return null
-
-        val hour =
-            parseNumber(word.groupValues[1])
-                ?: return null
-
-        if (hour !in 0..23) {
-            return null
-        }
-
-        return RawResult(
-            hour = hour,
-            minute = 0,
-            confidence = 96
-        )
-    }
-
-    // ---------------------------------------------------------------------
-    // Bare hour + context
-    // ---------------------------------------------------------------------
-
-    private fun extractBareHourWithContext(
-        text: String
-    ): RawResult? {
-
-        val hourPattern =
-            "(${hourWordsPattern()})"
-
-        val regex = Regex(
-            """\b$hourPattern\s+(?:صبح|بامداد|ظهر|عصر|بعد\s+از\s+ظهر|شب|نیمه\s+شب)\b"""
-        )
-
-        val match =
-            regex.find(text)
-                ?: return null
-
-        val hour =
-            parseNumber(match.groupValues[1])
-                ?: return null
-
-        if (hour !in 0..23) {
-            return null
-        }
-
-        return RawResult(
-            hour = hour,
-            minute = 0,
-            confidence = 91
-        )
-    }
-
-    // ---------------------------------------------------------------------
-    // AM / PM handling
-    // ---------------------------------------------------------------------
-
-    private fun applyDayPeriod(
-        rawHour: Int,
-        rawMinute: Int,
-        text: String,
-        confidence: Int
-    ): Result? {
-
-        var hour = rawHour
-        val minute = rawMinute
-
-        /*
-         * Explicit 24-hour times such as 17:30 should not
-         * receive another +12 adjustment.
-         */
-        val explicit24Hour =
-            hour >= 13
-
-        if (!explicit24Hour) {
-
-            when {
-
-                containsAny(
-                    text,
-                    "بعد از ظهر",
-                    "بعدازظهر",
-                    "عصر"
-                ) -> {
-
-                    if (hour in 1..11) {
-                        hour += 12
-                    }
-                }
-
-                containsAny(
-                    text,
-                    "ظهر"
-                ) -> {
-
-                    /*
-                     * 12 ظهر = 12:00
-                     *
-                     * "یک ظهر" = 13:00
-                     * "دو ظهر" = 14:00
-                     */
-                    if (hour in 1..11) {
-                        hour += 12
-                    }
-                }
-
-                containsAny(
-                    text,
-                    "شب"
-                ) -> {
-
-                    /*
-                     * 12 شب = 00:00
-                     * 1 شب = 01:00
-                     * 8 شب = 20:00
-                     */
-                    if (hour in 1..11) {
-                        hour += 12
-                    }
-
-                    if (hour == 12) {
-                        hour = 0
-                    }
-                }
-
-                containsAny(
-                    text,
-                    "نیمه شب"
-                ) -> {
-                    hour = 0
-                }
-
-                /*
-                 * "صبح" and "بامداد" require no change
-                 * for 1..11.
-                 *
-                 * 12 صبح is interpreted as 00:00.
-                 */
-                containsAny(
-                    text,
-                    "صبح",
-                    "بامداد"
-                ) -> {
-
-                    if (hour == 12) {
-                        hour = 0
-                    }
-                }
+        val hasContext =
+            appointmentContext.any {
+                text.contains(it)
             }
-        }
 
-        if (!isValidHour(hour)) {
+        if (!hasContext) {
             return null
         }
 
-        if (!isValidMinute(minute)) {
-            return null
+        val bareHourRegex =
+            Regex(
+                """(?<!\S)($numberPattern)(?!\S)"""
+            )
+
+        val bareMatch =
+            bareHourRegex.find(text)
+                ?: return null
+
+        val hour =
+            PersianNumberParser.parseInRange(
+                bareMatch.groupValues[1],
+                0,
+                23
+            )
+                ?: return null
+
+        return makeResult(
+            hour,
+            0
+        )
+    }
+
+    // =====================================================================
+    // HOUR EXTRACTION FROM SUBTEXT
+    // =====================================================================
+
+    private fun extractFirstHour(
+        text: String
+    ): Int? {
+
+        val normalized =
+            normalize(text)
+
+        /*
+         * First try "ساعت X".
+         */
+        val numberPattern =
+            PersianNumberParser
+                .hourPattern()
+
+        val explicitRegex =
+            Regex(
+                """ساعت\s+($numberPattern)"""
+            )
+
+        val explicit =
+            explicitRegex.find(
+                normalized
+            )
+
+        if (explicit != null) {
+
+            return PersianNumberParser
+                .parseInRange(
+                    explicit.groupValues[1],
+                    0,
+                    23
+                )
         }
+
+        /*
+         * Then try a plain number.
+         */
+        val plainRegex =
+            Regex(
+                """(?<!\S)($numberPattern)(?!\S)"""
+            )
+
+        val plain =
+            plainRegex.find(
+                normalized
+            )
+
+        if (plain != null) {
+
+            return PersianNumberParser
+                .parseInRange(
+                    plain.groupValues[1],
+                    0,
+                    23
+                )
+        }
+
+        /*
+         * Finally support numeric digits.
+         */
+        val digits =
+            Regex(
+                """(?<!\d)(\d{1,2})(?!\d)"""
+            )
+                .find(normalized)
+
+        return digits
+            ?.groupValues
+            ?.get(1)
+            ?.toIntOrNull()
+            ?.takeIf {
+                it in 0..23
+            }
+    }
+
+    // =====================================================================
+    // TIME ARITHMETIC
+    // =====================================================================
+
+    private fun subtractMinutes(
+        hour: Int,
+        minute: Int,
+        minutes: Int
+    ): Result {
+
+        var total =
+            hour * 60 +
+                minute -
+                minutes
+
+        /*
+         * If subtraction crosses midnight.
+         */
+        while (total < 0) {
+            total += 24 * 60
+        }
+
+        total %=
+            24 * 60
+
+        return makeResult(
+            hour = total / 60,
+            minute = total % 60
+        )
+    }
+
+    private fun addMinutes(
+        hour: Int,
+        minute: Int,
+        minutes: Int
+    ): Result {
+
+        var total =
+            hour * 60 +
+                minute +
+                minutes
+
+        total %=
+            24 * 60
+
+        return makeResult(
+            hour = total / 60,
+            minute = total % 60
+        )
+    }
+
+    // =====================================================================
+    // RESULT
+    // =====================================================================
+
+    private fun makeResult(
+        hour: Int,
+        minute: Int
+    ): Result {
 
         return Result(
             hour = hour,
@@ -766,234 +825,71 @@ object TimeExtractor {
                     "%02d:%02d",
                     hour,
                     minute
-                ),
-            confidence = confidence
+                )
         )
     }
 
-    // ---------------------------------------------------------------------
-    // Number parsing
-    // ---------------------------------------------------------------------
-
-    private val numbers = mapOf(
-
-        "صفر" to 0,
-
-        "یک" to 1,
-        "یه" to 1,
-        "یک عدد" to 1,
-
-        "دو" to 2,
-        "سه" to 3,
-        "چهار" to 4,
-        "پنج" to 5,
-        "شش" to 6,
-        "هفت" to 7,
-        "هشت" to 8,
-        "نه" to 9,
-
-        "ده" to 10,
-        "یازده" to 11,
-        "دوازده" to 12,
-        "سیزده" to 13,
-        "چهارده" to 14,
-        "پانزده" to 15,
-        "شانزده" to 16,
-        "هفده" to 17,
-        "هجده" to 18,
-        "نوزده" to 19,
-
-        "بیست" to 20,
-        "سی" to 30,
-        "چهل" to 40,
-        "پنجاه" to 50
-    )
-
-    private val hourNumbers =
-        numbers.filter {
-            it.value in 0..23
-        }
-
-    private val minuteNumbers =
-        numbers.filter {
-            it.value in 0..59
-        }
-
-    private fun parseNumber(
-        value: String
-    ): Int? {
-
-        val clean =
-            value
-                .trim()
-                .replace(
-                    "‌",
-                    ""
-                )
-
-        /*
-         * Direct digit.
-         */
-        clean.toIntOrNull()?.let {
-            return it
-        }
-
-        /*
-         * Direct word.
-         */
-        numbers[clean]?.let {
-            return it
-        }
-
-        /*
-         * Composite number:
-         *
-         * بیست و سه
-         * سی و پنج
-         */
-        val parts =
-            clean.split(
-                Regex("\\s+و\\s+")
-            )
-
-        if (parts.size == 2) {
-
-            val first =
-                numbers[parts[0].trim()]
-
-            val second =
-                numbers[parts[1].trim()]
-
-            if (
-                first != null &&
-                second != null
-            ) {
-
-                /*
-                 * 20 + 3 = 23
-                 */
-                if (
-                    first >= 20 &&
-                    second < 10
-                ) {
-                    return first + second
-                }
-            }
-        }
-
-        return null
-    }
-
-    // ---------------------------------------------------------------------
-    // Regex patterns
-    // ---------------------------------------------------------------------
-
-    private fun hourWordsPattern(): String {
-
-        return hourNumbers.keys
-            .sortedByDescending {
-                it.length
-            }
-            .joinToString("|") {
-                Regex.escape(it)
-            }
-    }
-
-    private fun minuteWordsPattern(): String {
-
-        return minuteNumbers.keys
-            .filter {
-                it.value in 1..59
-            }
-            .sortedByDescending {
-                it.length
-            }
-            .joinToString("|") {
-                Regex.escape(it)
-            }
-    }
-
-    private fun numberWordsPattern(): String {
-
-        return numbers.keys
-            .sortedByDescending {
-                it.length
-            }
-            .joinToString("|") {
-                Regex.escape(it)
-            }
-    }
-
-    // ---------------------------------------------------------------------
-    // Text normalization
-    // ---------------------------------------------------------------------
+    // =====================================================================
+    // NORMALIZATION
+    // =====================================================================
 
     private fun normalize(
         input: String
     ): String {
 
-        var text = input
+        var text =
+            input.trim()
 
         /*
-         * Arabic/Persian character normalization.
+         * Arabic -> Persian characters.
          */
         text = text
             .replace('ي', 'ی')
             .replace('ى', 'ی')
             .replace('ك', 'ک')
-            .replace('ۀ', 'ه')
-            .replace('ة', 'ه')
 
         /*
-         * Persian and Arabic digits -> English digits.
+         * Persian/Arabic digits -> English.
          */
-        text = normalizeDigits(text)
+        text =
+            normalizeDigits(text)
 
         /*
-         * Common spoken forms.
+         * Common speech recognition variants.
          */
         text = text
+            .replace(
+                "بعد از ظهر",
+                "بعدازظهر"
+            )
             .replace(
                 "بعدازظهر",
-                "بعد از ظهر"
+                "بعدازظهر"
             )
             .replace(
-                "بعد ازظهر",
-                "بعد از ظهر"
-            )
-            .replace(
-                "نیمه‌شب",
-                "نیمه شب"
+                "نیم ساعت",
+                "نیم"
             )
 
         /*
-         * Normalize punctuation.
+         * Normalize ZWNJ to ordinary space for matching.
          */
-        text = text
-            .replace(
-                '٫',
-                ':'
-            )
-            .replace(
-                '،',
-                ' '
-            )
-            .replace(
-                ',',
+        text =
+            text.replace(
+                '\u200C',
                 ' '
             )
 
         /*
          * Normalize whitespace.
          */
-        text = text
-            .replace(
+        text =
+            text.replace(
                 Regex("\\s+"),
                 " "
             )
-            .trim()
 
-        return text
+        return text.trim()
     }
 
     private fun normalizeDigits(
@@ -1038,41 +934,4 @@ object TimeExtractor {
 
         return result.toString()
     }
-
-    // ---------------------------------------------------------------------
-    // Helpers
-    // ---------------------------------------------------------------------
-
-    private fun containsAny(
-        text: String,
-        vararg values: String
-    ): Boolean {
-
-        return values.any {
-            text.contains(
-                it,
-                ignoreCase = false
-            )
-        }
-    }
-
-    private fun isValidHour(
-        hour: Int
-    ): Boolean {
-
-        return hour in 0..23
-    }
-
-    private fun isValidMinute(
-        minute: Int
-    ): Boolean {
-
-        return minute in 0..59
-    }
-
-    private data class RawResult(
-        val hour: Int,
-        val minute: Int,
-        val confidence: Int
-    )
 }
