@@ -1,677 +1,721 @@
 package ir.appointment.voice.voice.extractor
 
-import ir.appointment.voice.voice.PersianCalendar
-
 /**
- * Extracts Jalali dates from normalized Persian speech text.
+ * Extracts Jalali date information from Persian speech.
  *
- * Supported examples:
+ * Examples:
+ *
  *   امروز
- *   امشب
  *   فردا
  *   پس فردا
  *   دو روز دیگر
  *   دو روز بعد
- *   سه روز دیگر
- *   یک هفته دیگر
- *   هفته آینده
- *   هفته بعد
+ *   دو روز دیگه
+ *   سه روز دیگه
+ *   یک هفته بعد
  *   شنبه
- *   شنبه آینده
- *   سه شنبه بعد
+ *   دوشنبه هفته بعد
+ *   دوازدهم مرداد
+ *   بیست و پنجم شهریور
  *   12 مرداد
  *   12 مرداد 1405
- *   دوازدهم مرداد
- *   1405/5/12
+ *   1405/05/12
  */
 object DateExtractor {
 
     data class Result(
-        val year: Int?,
-        val month: Int?,
-        val day: Int?,
+        val year: Int,
+        val month: Int,
+        val day: Int,
         val weekdayName: String?,
-        val displayDate: String?
+        val displayDate: String
     )
 
-    private val weekdays = listOf(
-        "شنبه",
-        "یکشنبه",
-        "دوشنبه",
-        "سه‌شنبه",
-        "چهارشنبه",
-        "پنجشنبه",
-        "جمعه"
-    )
+    private val months =
+        PersianCalendar.jalaliMonthNames
 
-    private val weekdayAliases = mapOf(
-        "سه شنبه" to "سه‌شنبه",
-        "سه‌شنبه" to "سه‌شنبه",
-        "پنج شنبه" to "پنجشنبه",
-        "پنج‌شنبه" to "پنجشنبه"
-    )
+    private val weekdayIndex =
+        mapOf(
+            "شنبه" to 0,
+            "یکشنبه" to 1,
+            "دوشنبه" to 2,
+            "سه شنبه" to 3,
+            "سه‌شنبه" to 3,
+            "چهارشنبه" to 4,
+            "پنجشنبه" to 5,
+            "پنج شنبه" to 5,
+            "پنج‌شنبه" to 5,
+            "جمعه" to 6
+        )
 
-    private val weekdayIndex = mapOf(
-        "شنبه" to 0,
-        "یکشنبه" to 1,
-        "دوشنبه" to 2,
-        "سه‌شنبه" to 3,
-        "چهارشنبه" to 4,
-        "پنجشنبه" to 5,
-        "جمعه" to 6
-    )
-
-    private val monthNames = PersianCalendar.jalaliMonthNames
-
-    private val monthAliases = mapOf(
-        "فروردین" to 1,
-        "اردیبهشت" to 2,
-        "خرداد" to 3,
-        "تیر" to 4,
-        "مرداد" to 5,
-        "شهریور" to 6,
-        "مهر" to 7,
-        "آبان" to 8,
-        "آذر" to 9,
-        "دی" to 10,
-        "بهمن" to 11,
-        "اسفند" to 12
-    )
-
-    /*
-     * Ordinal day names.
-     *
-     * We deliberately keep this dictionary local to the date extractor.
-     * It avoids coupling the date parser to the general number parser.
-     */
-    private val ordinalDays = mapOf(
-        "یکم" to 1,
-        "اول" to 1,
-        "دوم" to 2,
-        "سوم" to 3,
-        "چهارم" to 4,
-        "پنجم" to 5,
-        "ششم" to 6,
-        "هفتم" to 7,
-        "هشتم" to 8,
-        "نهم" to 9,
-        "دهم" to 10,
-        "یازدهم" to 11,
-        "دوازدهم" to 12,
-        "سیزدهم" to 13,
-        "چهاردهم" to 14,
-        "پانزدهم" to 15,
-        "شانزدهم" to 16,
-        "هفدهم" to 17,
-        "هجدهم" to 18,
-        "نوزدهم" to 19,
-        "بیستم" to 20,
-        "بیست و یکم" to 21,
-        "بیست و دوم" to 22,
-        "بیست و سوم" to 23,
-        "بیست و چهارم" to 24,
-        "بیست و پنجم" to 25,
-        "بیست و ششم" to 26,
-        "بیست و هفتم" to 27,
-        "بیست و هشتم" to 28,
-        "بیست و نهم" to 29,
-        "سی‌ام" to 30,
-        "سی ام" to 30,
-        "سی و یکم" to 31
-    )
+    private val ordinalNumbers =
+        mapOf(
+            "یکم" to 1,
+            "اول" to 1,
+            "دوم" to 2,
+            "سوم" to 3,
+            "چهارم" to 4,
+            "پنجم" to 5,
+            "ششم" to 6,
+            "هفتم" to 7,
+            "هشتم" to 8,
+            "نهم" to 9,
+            "دهم" to 10,
+            "یازدهم" to 11,
+            "دوازدهم" to 12,
+            "سیزدهم" to 13,
+            "چهاردهم" to 14,
+            "پانزدهم" to 15,
+            "شانزدهم" to 16,
+            "هفدهم" to 17,
+            "هجدهم" to 18,
+            "نوزدهم" to 19,
+            "بیستم" to 20,
+            "بیست و یکم" to 21,
+            "بیست و دوم" to 22,
+            "بیست و سوم" to 23,
+            "بیست و چهارم" to 24,
+            "بیست و پنجم" to 25,
+            "بیست و ششم" to 26,
+            "بیست و هفتم" to 27,
+            "بیست و هشتم" to 28,
+            "بیست و نهم" to 29,
+            "سی‌ام" to 30,
+            "سی ام" to 30,
+            "سی و یکم" to 31
+        )
 
     /**
-     * Main entry point.
+     * Main date extraction function.
      */
-    fun extract(text: String): Result {
+    fun extract(
+        input: String
+    ): Result? {
 
-        val normalized = normalize(text)
+        val text =
+            normalize(input)
 
-        if (normalized.isEmpty()) {
-            return Result(
-                year = null,
-                month = null,
-                day = null,
-                weekdayName = null,
-                displayDate = null
-            )
+        if (text.isEmpty()) {
+            return null
         }
 
         /*
-         * Explicit dates have priority over relative dates.
+         * -------------------------------------------------------------
+         * 1. Explicit numeric Jalali date
          *
-         * Example:
-         * "فردا 12 مرداد قرار دارم"
-         *
-         * In this situation the explicit date is the more informative
-         * expression.
+         * 1405/05/12
+         * 1405-05-12
+         * 1405.05.12
+         * -------------------------------------------------------------
          */
-        extractNumericDate(normalized)?.let {
-            return buildResult(
-                it.first,
-                it.second,
-                it.third
-            )
-        }
+        val numericResult =
+            extractNumericDate(text)
 
-        extractDayMonthDate(normalized)?.let {
-            return buildResult(
-                it.first,
-                it.second,
-                it.third
-            )
-        }
-
-        extractOrdinalDayMonth(normalized)?.let {
-            return buildResult(
-                it.first,
-                it.second,
-                it.third
-            )
+        if (numericResult != null) {
+            return numericResult
         }
 
         /*
-         * Relative expressions:
+         * -------------------------------------------------------------
+         * 2. Day + month
          *
+         * 12 مرداد
+         * 12 مرداد 1405
+         *
+         * This is checked before relative dates because it is more
+         * explicit.
+         * -------------------------------------------------------------
+         */
+        val numericDayMonthResult =
+            extractNumericDayMonth(text)
+
+        if (numericDayMonthResult != null) {
+            return numericDayMonthResult
+        }
+
+        /*
+         * -------------------------------------------------------------
+         * 3. Ordinal day + month
+         *
+         * دوازدهم مرداد
+         * بیست و پنجم شهریور
+         * -------------------------------------------------------------
+         */
+        val ordinalDayMonthResult =
+            extractOrdinalDayMonth(text)
+
+        if (ordinalDayMonthResult != null) {
+            return ordinalDayMonthResult
+        }
+
+        /*
+         * -------------------------------------------------------------
+         * 4. Relative dates
+         *
+         * دو روز دیگه
          * دو روز دیگر
          * دو روز بعد
-         * دو روز دیگه
-         * 3 روز دیگر
+         * سه روز دیگه
+         * یک هفته بعد
+         * -------------------------------------------------------------
          */
-        extractRelativeDays(normalized)?.let { offset ->
-            val today = PersianCalendar.todayJalali()
-            val shifted = shiftDays(
-                today.first,
-                today.second,
-                today.third,
-                offset
-            )
+        val relativeResult =
+            extractRelativeDate(text)
 
-            return buildResult(
-                shifted.first,
-                shifted.second,
-                shifted.third,
-                relativeDisplay(offset)
-            )
+        if (relativeResult != null) {
+            return relativeResult
         }
 
         /*
-         * Weeks.
-         */
-        extractRelativeWeeks(normalized)?.let { weeks ->
-            val today = PersianCalendar.todayJalali()
-
-            val shifted = shiftDays(
-                today.first,
-                today.second,
-                today.third,
-                weeks * 7
-            )
-
-            return buildResult(
-                shifted.first,
-                shifted.second,
-                shifted.third,
-                if (weeks == 1) "هفته آینده" else "$weeks هفته دیگر"
-            )
-        }
-
-        /*
-         * امروز / امشب
-         */
-        if (
-            containsWord(normalized, "امروز") ||
-            containsWord(normalized, "امشب")
-        ) {
-            val today = PersianCalendar.todayJalali()
-
-            return buildResult(
-                today.first,
-                today.second,
-                today.third,
-                if (containsWord(normalized, "امشب")) {
-                    "امشب"
-                } else {
-                    "امروز"
-                }
-            )
-        }
-
-        /*
-         * فردا
-         */
-        if (containsWord(normalized, "فردا")) {
-
-            val tomorrow = shiftFromToday(1)
-
-            return buildResult(
-                tomorrow.first,
-                tomorrow.second,
-                tomorrow.third,
-                "فردا"
-            )
-        }
-
-        /*
+         * -------------------------------------------------------------
+         * 5. Explicit relative words
+         *
          * پس فردا
+         * فردا
+         * امروز
+         * امشب
+         * -------------------------------------------------------------
          */
-        if (
-            containsWord(normalized, "پس‌فردا") ||
-            containsWord(normalized, "پس فردا")
-        ) {
+        val simpleRelativeResult =
+            extractSimpleRelativeDate(text)
 
-            val afterTomorrow = shiftFromToday(2)
-
-            return buildResult(
-                afterTomorrow.first,
-                afterTomorrow.second,
-                afterTomorrow.third,
-                "پس‌فردا"
-            )
+        if (simpleRelativeResult != null) {
+            return simpleRelativeResult
         }
 
         /*
-         * Weekday expressions.
+         * -------------------------------------------------------------
+         * 6. Weekday
+         *
+         * شنبه
+         * دوشنبه
+         * پنجشنبه
+         * -------------------------------------------------------------
          */
-        extractWeekdayDate(normalized)?.let {
-            return buildResult(
-                it.first,
-                it.second,
-                it.third,
-                it.fourth
-            )
+        val weekdayResult =
+            extractWeekday(text)
+
+        if (weekdayResult != null) {
+            return weekdayResult
         }
 
-        return Result(
-            year = null,
-            month = null,
-            day = null,
-            weekdayName = extractSpokenWeekday(normalized),
-            displayDate = null
-        )
+        return null
     }
 
-    // ---------------------------------------------------------------------
-    // Explicit numeric dates
-    // ---------------------------------------------------------------------
+    // =====================================================================
+    // NUMERIC DATE
+    // =====================================================================
 
     private fun extractNumericDate(
         text: String
-    ): Triple<Int, Int, Int>? {
+    ): Result? {
 
-        /*
-         * 1405/5/12
-         * 1405-5-12
-         * 1405.5.12
-         */
-        val regex = Regex(
-            """\b(1[34]\d{2})\s*[/\-\.]\s*(\d{1,2})\s*[/\-\.]\s*(\d{1,2})\b"""
-        )
+        val regex =
+            Regex(
+                """\b(1[34]\d{2})[/\-.](\d{1,2})[/\-.](\d{1,2})\b"""
+            )
 
-        val match = regex.find(text) ?: return null
+        val match =
+            regex.find(text)
+                ?: return null
 
-        val year = match.groupValues[1].toIntOrNull()
-            ?: return null
+        val year =
+            match.groupValues[1]
+                .toIntOrNull()
+                ?: return null
 
-        val month = match.groupValues[2].toIntOrNull()
-            ?: return null
+        val month =
+            match.groupValues[2]
+                .toIntOrNull()
+                ?: return null
 
-        val day = match.groupValues[3].toIntOrNull()
-            ?: return null
-
-        return if (isValidDate(year, month, day)) {
-            Triple(year, month, day)
-        } else {
-            null
-        }
-    }
-
-    // ---------------------------------------------------------------------
-    // "12 مرداد 1405"
-    // ---------------------------------------------------------------------
-
-    private fun extractDayMonthDate(
-        text: String
-    ): Triple<Int, Int, Int>? {
-
-        val monthPattern = monthNames
-            .sortedByDescending { it.length }
-            .joinToString("|") {
-                Regex.escape(it)
-            }
-
-        val regex = Regex(
-            """\b(\d{1,2})\s*(?:ام)?\s*($monthPattern)(?:\s+(1[34]\d{2}))?\b"""
-        )
-
-        val match = regex.find(text) ?: return null
-
-        val day = match.groupValues[1].toIntOrNull()
-            ?: return null
-
-        val month = monthAliases[match.groupValues[2]]
-            ?: return null
-
-        val year = if (match.groupValues[3].isNotEmpty()) {
-            match.groupValues[3].toIntOrNull()
-        } else {
-            PersianCalendar.todayJalali().first
-        }
-
-        if (year == null) return null
-
-        return if (isValidDate(year, month, day)) {
-            Triple(year, month, day)
-        } else {
-            null
-        }
-    }
-
-    // ---------------------------------------------------------------------
-    // "دوازدهم مرداد"
-    // ---------------------------------------------------------------------
-
-    private fun extractOrdinalDayMonth(
-        text: String
-    ): Triple<Int, Int, Int>? {
-
-        val ordinalPattern = ordinalDays.keys
-            .sortedByDescending { it.length }
-            .joinToString("|") {
-                Regex.escape(it)
-            }
-
-        val monthPattern = monthNames
-            .sortedByDescending { it.length }
-            .joinToString("|") {
-                Regex.escape(it)
-            }
-
-        val regex = Regex(
-            """($ordinalPattern)\s+($monthPattern)(?:\s+(1[34]\d{2}))?"""
-        )
-
-        val match = regex.find(text) ?: return null
-
-        val day = ordinalDays[match.groupValues[1]]
-            ?: return null
-
-        val month = monthAliases[match.groupValues[2]]
-            ?: return null
-
-        val year = if (match.groupValues[3].isNotEmpty()) {
-            match.groupValues[3].toIntOrNull()
-        } else {
-            PersianCalendar.todayJalali().first
-        }
-
-        if (year == null) return null
-
-        return if (isValidDate(year, month, day)) {
-            Triple(year, month, day)
-        } else {
-            null
-        }
-    }
-
-    // ---------------------------------------------------------------------
-    // Relative days
-    // ---------------------------------------------------------------------
-
-    private fun extractRelativeDays(
-        text: String
-    ): Int? {
-
-        /*
-         * First try digits.
-         *
-         * Examples:
-         * 2 روز دیگر
-         * 2 روز بعد
-         * ۲ روز دیگه
-         */
-        val digitRegex = Regex(
-            """\b(\d{1,2})\s*روز\s*(?:دیگر|بعد|دیگه)\b"""
-        )
-
-        digitRegex.find(text)?.let {
-            return it.groupValues[1].toIntOrNull()
-        }
-
-        /*
-         * Word numbers.
-         *
-         * The parser intentionally accepts the common small numbers
-         * used in natural appointment speech.
-         */
-        val numberWords = mapOf(
-            "یک" to 1,
-            "یه" to 1,
-            "دو" to 2,
-            "سه" to 3,
-            "چهار" to 4,
-            "پنج" to 5,
-            "شش" to 6,
-            "هفت" to 7,
-            "هشت" to 8,
-            "نه" to 9,
-            "ده" to 10,
-            "یازده" to 11,
-            "دوازده" to 12,
-            "سیزده" to 13,
-            "چهارده" to 14,
-            "پانزده" to 15,
-            "شانزده" to 16,
-            "هفده" to 17,
-            "هجده" to 18,
-            "نوزده" to 19,
-            "بیست" to 20
-        )
-
-        val wordPattern = numberWords.keys
-            .sortedByDescending { it.length }
-            .joinToString("|") {
-                Regex.escape(it)
-            }
-
-        val wordRegex = Regex(
-            """($wordPattern)\s*روز\s*(?:دیگر|بعد|دیگه)\b"""
-        )
-
-        wordRegex.find(text)?.let {
-            return numberWords[it.groupValues[1]]
-        }
-
-        return null
-    }
-
-    // ---------------------------------------------------------------------
-    // Relative weeks
-    // ---------------------------------------------------------------------
-
-    private fun extractRelativeWeeks(
-        text: String
-    ): Int? {
+        val day =
+            match.groupValues[3]
+                .toIntOrNull()
+                ?: return null
 
         if (
-            containsPhrase(text, "هفته آینده") ||
-            containsPhrase(text, "هفته بعد") ||
-            containsPhrase(text, "هفته دیگه")
-        ) {
-            return 1
-        }
-
-        val digitRegex = Regex(
-            """\b(\d{1,2})\s*هفته\s*(?:دیگر|بعد|دیگه)\b"""
-        )
-
-        digitRegex.find(text)?.let {
-            return it.groupValues[1].toIntOrNull()
-        }
-
-        val words = mapOf(
-            "یک" to 1,
-            "یه" to 1,
-            "دو" to 2,
-            "سه" to 3,
-            "چهار" to 4,
-            "پنج" to 5,
-            "شش" to 6,
-            "هفت" to 7,
-            "هشت" to 8,
-            "نه" to 9,
-            "ده" to 10
-        )
-
-        for ((word, number) in words) {
-
-            if (
-                containsPhrase(text, "$word هفته دیگر") ||
-                containsPhrase(text, "$word هفته بعد") ||
-                containsPhrase(text, "$word هفته دیگه")
-            ) {
-                return number
-            }
-        }
-
-        return null
-    }
-
-    // ---------------------------------------------------------------------
-    // Weekdays
-    // ---------------------------------------------------------------------
-
-    private fun extractWeekdayDate(
-        text: String
-    ): Quadruple<Int, Int, Int, String>? {
-
-        val spoken = extractSpokenWeekday(text)
-            ?: return null
-
-        val canonical = weekdayAliases[spoken] ?: spoken
-
-        val targetIndex = weekdayIndex[canonical]
-            ?: return null
-
-        val today = PersianCalendar.todayJalali()
-
-        val todayName = PersianCalendar.weekdayName(
-            today.first,
-            today.second,
-            today.third
-        ) ?: return null
-
-        val todayCanonical =
-            weekdayAliases[todayName] ?: todayName
-
-        val todayIndex =
-            weekdayIndex[todayCanonical] ?: return null
-
-        var offset =
-            (targetIndex - todayIndex + 7) % 7
-
-        /*
-         * "شنبه" by itself means the next occurrence.
-         * Therefore if today is Saturday, select next Saturday.
-         */
-        if (offset == 0) {
-            offset = 7
-        }
-
-        /*
-         * Explicit words such as "آینده" and "بعد" also mean
-         * the next occurrence. For normal weekday names this
-         * is already satisfied by the offset calculation above.
-         */
-        val date = shiftDays(
-            today.first,
-            today.second,
-            today.third,
-            offset
-        )
-
-        return Quadruple(
-            date.first,
-            date.second,
-            date.third,
-            canonical
-        )
-    }
-
-    private fun extractSpokenWeekday(
-        text: String
-    ): String? {
-
-        val candidates = listOf(
-            "سه شنبه",
-            "سه‌شنبه",
-            "پنج شنبه",
-            "پنج‌شنبه",
-            "یکشنبه",
-            "دوشنبه",
-            "چهارشنبه",
-            "پنجشنبه",
-            "شنبه",
-            "جمعه"
-        )
-
-        return candidates
-            .sortedByDescending { it.length }
-            .firstOrNull {
-                containsWord(text, it)
-            }
-    }
-
-    // ---------------------------------------------------------------------
-    // Result construction
-    // ---------------------------------------------------------------------
-
-    private fun buildResult(
-        year: Int,
-        month: Int,
-        day: Int,
-        explicitDisplay: String? = null
-    ): Result {
-
-        val weekday =
-            PersianCalendar.weekdayName(
+            !isValidDate(
                 year,
                 month,
                 day
             )
+        ) {
+            return null
+        }
 
-        val display =
-            explicitDisplay
-                ?: "$day ${monthNames.getOrNull(month - 1) ?: ""} $year"
+        return makeResult(
+            year,
+            month,
+            day,
+            displayDate =
+                "$day ${monthName(month)} $year"
+        )
+    }
 
-        return Result(
-            year = year,
-            month = month,
-            day = day,
-            weekdayName = weekday,
+    // =====================================================================
+    // DAY + MONTH
+    // =====================================================================
+
+    private fun extractNumericDayMonth(
+        text: String
+    ): Result? {
+
+        val monthPattern =
+            months
+                .sortedByDescending {
+                    it.length
+                }
+                .joinToString("|") {
+                    Regex.escape(it)
+                }
+
+        val regex =
+            Regex(
+                """(?<!\d)(\d{1,2})\s*(?:ام)?\s*($monthPattern)(?:\s+(1[34]\d{2}))?"""
+            )
+
+        val match =
+            regex.find(text)
+                ?: return null
+
+        val day =
+            match.groupValues[1]
+                .toIntOrNull()
+                ?: return null
+
+        val monthName =
+            match.groupValues[2]
+
+        val month =
+            months.indexOf(monthName) + 1
+
+        if (
+            month <= 0 ||
+            day !in 1..31
+        ) {
+            return null
+        }
+
+        val year =
+            match.groupValues[3]
+                .toIntOrNull()
+                ?: PersianCalendar.todayJalali().first
+
+        if (
+            !isValidDate(
+                year,
+                month,
+                day
+            )
+        ) {
+            return null
+        }
+
+        return makeResult(
+            year,
+            month,
+            day,
+            displayDate =
+                "$day $monthName $year"
+        )
+    }
+
+    // =====================================================================
+    // ORDINAL DAY + MONTH
+    // =====================================================================
+
+    private fun extractOrdinalDayMonth(
+        text: String
+    ): Result? {
+
+        val ordinalPattern =
+            ordinalNumbers.keys
+                .sortedByDescending {
+                    it.length
+                }
+                .joinToString("|") {
+                    Regex.escape(it)
+                }
+
+        val monthPattern =
+            months
+                .sortedByDescending {
+                    it.length
+                }
+                .joinToString("|") {
+                    Regex.escape(it)
+                }
+
+        val regex =
+            Regex(
+                """($ordinalPattern)\s+($monthPattern)(?:\s+(1[34]\d{2}))?"""
+            )
+
+        val match =
+            regex.find(text)
+                ?: return null
+
+        val day =
+            ordinalNumbers[
+                match.groupValues[1]
+            ]
+                ?: return null
+
+        val month =
+            months.indexOf(
+                match.groupValues[2]
+            ) + 1
+
+        if (
+            month <= 0
+        ) {
+            return null
+        }
+
+        val year =
+            match.groupValues[3]
+                .toIntOrNull()
+                ?: PersianCalendar.todayJalali().first
+
+        if (
+            !isValidDate(
+                year,
+                month,
+                day
+            )
+        ) {
+            return null
+        }
+
+        return makeResult(
+            year,
+            month,
+            day,
+            displayDate =
+                "$day ${match.groupValues[2]} $year"
+        )
+    }
+
+    // =====================================================================
+    // RELATIVE DATE
+    // =====================================================================
+
+    private fun extractRelativeDate(
+        text: String
+    ): Result? {
+
+        /*
+         * Important:
+         *
+         * "دیگه" is intentionally included.
+         *
+         * This fixes the original failure:
+         *
+         *   دو روز دیگه
+         *
+         * which was not recognized by the previous implementation.
+         */
+
+        val numberPattern =
+            buildNumberPattern()
+
+        val regex =
+            Regex(
+                """($numberPattern)\s+روز\s+(دیگه|دیگر|بعد)"""
+            )
+
+        val match =
+            regex.find(text)
+
+        if (match != null) {
+
+            val numberText =
+                match.groupValues[1]
+
+            val offset =
+                PersianNumberParser.parse(
+                    numberText
+                )
+                    ?: return null
+
+            if (
+                offset < 0 ||
+                offset > 365
+            ) {
+                return null
+            }
+
+            return shiftFromToday(
+                offset = offset,
+                display = "$numberText روز ${match.groupValues[2]}"
+            )
+        }
+
+        /*
+         * Numeric form:
+         *
+         * 2 روز دیگه
+         * 3 روز بعد
+         */
+        val digitRegex =
+            Regex(
+                """(\d{1,3})\s+روز\s+(دیگه|دیگر|بعد)"""
+            )
+
+        val digitMatch =
+            digitRegex.find(text)
+
+        if (digitMatch != null) {
+
+            val offset =
+                digitMatch
+                    .groupValues[1]
+                    .toIntOrNull()
+                    ?: return null
+
+            if (
+                offset !in 0..365
+            ) {
+                return null
+            }
+
+            return shiftFromToday(
+                offset = offset,
+                display =
+                    "${offset} روز ${digitMatch.groupValues[2]}"
+            )
+        }
+
+        /*
+         * هفته بعد / هفته دیگر / هفته دیگه
+         */
+        val weekRegex =
+            Regex(
+                """(یک|یک\s+هفته|دو|سه|\d+)\s*هفته\s*(دیگه|دیگر|بعد)"""
+            )
+
+        val weekMatch =
+            weekRegex.find(text)
+
+        if (weekMatch != null) {
+
+            val rawNumber =
+                weekMatch.groupValues[1]
+                    .replace(
+                        " هفته",
+                        ""
+                    )
+                    .trim()
+
+            val weeks =
+                PersianNumberParser.parse(
+                    rawNumber
+                )
+                    ?: return null
+
+            if (
+                weeks !in 1..52
+            ) {
+                return null
+            }
+
+            val offset =
+                weeks * 7
+
+            return shiftFromToday(
+                offset = offset,
+                display =
+                    "$rawNumber هفته ${weekMatch.groupValues[2]}"
+            )
+        }
+
+        /*
+         * "یک هفته دیگر"
+         */
+        if (
+            text.contains(
+                "یک هفته دیگر"
+            ) ||
+            text.contains(
+                "یک هفته دیگه"
+            ) ||
+            text.contains(
+                "یک هفته بعد"
+            )
+        ) {
+            return shiftFromToday(
+                offset = 7,
+                display = "یک هفته بعد"
+            )
+        }
+
+        return null
+    }
+
+    // =====================================================================
+    // SIMPLE RELATIVE DATE
+    // =====================================================================
+
+    private fun extractSimpleRelativeDate(
+        text: String
+    ): Result? {
+
+        /*
+         * Check "پس فردا" before "فردا".
+         */
+        if (
+            text.contains(
+                "پس‌فردا"
+            ) ||
+            text.contains(
+                "پس فردا"
+            )
+        ) {
+
+            return shiftFromToday(
+                offset = 2,
+                display = "پس‌فردا"
+            )
+        }
+
+        if (
+            text.contains(
+                "فردا"
+            )
+        ) {
+
+            return shiftFromToday(
+                offset = 1,
+                display = "فردا"
+            )
+        }
+
+        if (
+            text.contains(
+                "امروز"
+            ) ||
+            text.contains(
+                "امشب"
+            )
+        ) {
+
+            val today =
+                PersianCalendar.todayJalali()
+
+            return makeResult(
+                year = today.first,
+                month = today.second,
+                day = today.third,
+                displayDate =
+                    if (
+                        text.contains("امشب")
+                    ) {
+                        "امشب"
+                    } else {
+                        "امروز"
+                    }
+            )
+        }
+
+        return null
+    }
+
+    // =====================================================================
+    // WEEKDAY
+    // =====================================================================
+
+    private fun extractWeekday(
+        text: String
+    ): Result? {
+
+        val weekday =
+            weekdayIndex.keys
+                .sortedByDescending {
+                    it.length
+                }
+                .firstOrNull {
+                    containsWord(
+                        text,
+                        it
+                    )
+                }
+                ?: return null
+
+        val targetIndex =
+            weekdayIndex[weekday]
+                ?: return null
+
+        val today =
+            PersianCalendar.todayJalali()
+
+        val todayName =
+            PersianCalendar.weekdayName(
+                today.first,
+                today.second,
+                today.third
+            )
+
+        val todayIndex =
+            weekdayIndex[todayName]
+                ?: return null
+
+        var offset =
+            (
+                targetIndex -
+                    todayIndex +
+                    7
+                ) % 7
+
+        /*
+         * If user only says:
+         *
+         *   شنبه
+         *
+         * interpret it as the upcoming Saturday rather than
+         * today when today itself is Saturday.
+         */
+        if (
+            offset == 0
+        ) {
+            offset = 7
+        }
+
+        return shiftFromToday(
+            offset = offset,
+            display = weekday
+        )
+    }
+
+    // =====================================================================
+    // DATE SHIFT
+    // =====================================================================
+
+    private fun shiftFromToday(
+        offset: Int,
+        display: String
+    ): Result {
+
+        val today =
+            PersianCalendar.todayJalali()
+
+        val shifted =
+            shiftJalaliDay(
+                year = today.first,
+                month = today.second,
+                day = today.third,
+                offsetDays = offset
+            )
+
+        return makeResult(
+            year = shifted.first,
+            month = shifted.second,
+            day = shifted.third,
             displayDate = display
         )
     }
 
-    // ---------------------------------------------------------------------
-    // Date arithmetic
-    // ---------------------------------------------------------------------
-
-    private fun shiftFromToday(
-        offset: Int
-    ): Triple<Int, Int, Int> {
-
-        val today = PersianCalendar.todayJalali()
-
-        return shiftDays(
-            today.first,
-            today.second,
-            today.third,
-            offset
-        )
-    }
-
-    private fun shiftDays(
+    private fun shiftJalaliDay(
         year: Int,
         month: Int,
         day: Int,
@@ -702,15 +746,48 @@ object DateExtractor {
         )
 
         return PersianCalendar.gregorianToJalali(
-            calendar.get(java.util.Calendar.YEAR),
-            calendar.get(java.util.Calendar.MONTH) + 1,
-            calendar.get(java.util.Calendar.DAY_OF_MONTH)
+            calendar.get(
+                java.util.Calendar.YEAR
+            ),
+            calendar.get(
+                java.util.Calendar.MONTH
+            ) + 1,
+            calendar.get(
+                java.util.Calendar.DAY_OF_MONTH
+            )
         )
     }
 
-    // ---------------------------------------------------------------------
-    // Validation
-    // ---------------------------------------------------------------------
+    // =====================================================================
+    // RESULT
+    // =====================================================================
+
+    private fun makeResult(
+        year: Int,
+        month: Int,
+        day: Int,
+        displayDate: String
+    ): Result {
+
+        val weekday =
+            PersianCalendar.weekdayName(
+                year,
+                month,
+                day
+            )
+
+        return Result(
+            year = year,
+            month = month,
+            day = day,
+            weekdayName = weekday,
+            displayDate = displayDate
+        )
+    }
+
+    // =====================================================================
+    // VALIDATION
+    // =====================================================================
 
     private fun isValidDate(
         year: Int,
@@ -718,90 +795,172 @@ object DateExtractor {
         day: Int
     ): Boolean {
 
-        if (year < 1300 || year > 1600) return false
-        if (month !in 1..12) return false
-        if (day !in 1..31) return false
-
-        if (month <= 6 && day > 31) return false
-        if (month in 7..11 && day > 30) return false
-
-        if (month == 12) {
-
-            val leap =
-                isJalaliLeapYear(year)
-
-            val maxDay =
-                if (leap) 30 else 29
-
-            if (day > maxDay) return false
+        if (
+            year !in 1300..1500
+        ) {
+            return false
         }
 
-        return true
-    }
+        if (
+            month !in 1..12
+        ) {
+            return false
+        }
 
-    private fun isJalaliLeapYear(
-        year: Int
-    ): Boolean {
+        if (
+            day !in 1..31
+        ) {
+            return false
+        }
 
         /*
-         * Use the calendar implementation already present
-         * in the application rather than introducing another
-         * Jalali calendar library.
+         * Validate by attempting Jalali -> Gregorian conversion.
+         *
+         * This also protects against impossible dates such as
+         * 31 Esfand in a non-leap year.
          */
         return try {
 
-            val g1 =
-                PersianCalendar.jalaliToGregorian(
-                    year,
-                    12,
-                    29
-                )
+            PersianCalendar.jalaliToGregorian(
+                year,
+                month,
+                day
+            )
 
-            val g2 =
-                PersianCalendar.jalaliToGregorian(
-                    year,
-                    12,
-                    30
-                )
+            true
 
-            g1 != g2
+        } catch (
+            _: Exception
+        ) {
 
-        } catch (_: Exception) {
             false
         }
     }
 
-    // ---------------------------------------------------------------------
-    // Text helpers
-    // ---------------------------------------------------------------------
+    // =====================================================================
+    // HELPERS
+    // =====================================================================
+
+    private fun monthName(
+        month: Int
+    ): String {
+
+        return months.getOrNull(
+            month - 1
+        ) ?: ""
+    }
+
+    private fun containsWord(
+        text: String,
+        word: String
+    ): Boolean {
+
+        val index =
+            text.indexOf(word)
+
+        if (
+            index < 0
+        ) {
+            return false
+        }
+
+        val beforeOk =
+            index == 0 ||
+                text[index - 1].isWhitespace()
+
+        val end =
+            index + word.length
+
+        val afterOk =
+            end >= text.length ||
+                text[end].isWhitespace()
+
+        return beforeOk && afterOk
+    }
+
+    /**
+     * Builds a pattern from the number parser rather than keeping
+     * another duplicate number dictionary here.
+     */
+    private fun buildNumberPattern(): String {
+
+        return PersianNumberParser
+            .numberWords()
+            .sortedByDescending {
+                it.length
+            }
+            .joinToString("|") {
+                Regex.escape(it)
+            }
+    }
+
+    // =====================================================================
+    // NORMALIZATION
+    // =====================================================================
 
     private fun normalize(
         input: String
     ): String {
 
-        var text = input
+        var text =
+            input.trim()
 
+        /*
+         * Persian/Arabic characters.
+         */
         text = text
             .replace('ي', 'ی')
+            .replace('ى', 'ی')
             .replace('ك', 'ک')
             .replace('ۀ', 'ه')
             .replace('ة', 'ه')
 
-        text = normalizeDigits(text)
+        /*
+         * Persian and Arabic digits.
+         */
+        text =
+            normalizeDigits(text)
 
+        /*
+         * Common speech-recognition variants.
+         */
         text = text
-            .replace("سه شنبه", "سه‌شنبه")
-            .replace("پنج شنبه", "پنج‌شنبه")
-            .replace("پس فردا", "پس‌فردا")
-            .replace("پس‌فردای", "پس‌فردا")
-            .replace("دیگه", "دیگر")
+            .replace(
+                "پس فردا",
+                "پس‌فردا"
+            )
+            .replace(
+                "سه شنبه",
+                "سه‌شنبه"
+            )
+            .replace(
+                "پنج شنبه",
+                "پنجشنبه"
+            )
 
-        text = text
-            .replace(Regex("[،,؛;]+"), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
+        /*
+         * Colloquial "دیگه" is deliberately preserved.
+         *
+         * We need it for:
+         *
+         *   دو روز دیگه
+         */
+        text =
+            text.replace(
+                "ديگه",
+                "دیگه"
+            )
 
-        return text
+        /*
+         * Normalize whitespace.
+         */
+        text =
+            text.replace(
+                Regex("\\s+"),
+                " "
+            )
+
+        return text.trim()
     }
 
     private fun normalizeDigits(
@@ -815,74 +974,35 @@ object DateExtractor {
             "٠١٢٣٤٥٦٧٨٩"
 
         val result =
-            StringBuilder(input.length)
+            StringBuilder(
+                input.length
+            )
 
-        for (char in input) {
+        for (ch in input) {
 
-            val p =
-                persianDigits.indexOf(char)
+            val persianIndex =
+                persianDigits.indexOf(ch)
 
-            val a =
-                arabicDigits.indexOf(char)
+            val arabicIndex =
+                arabicDigits.indexOf(ch)
 
             when {
 
-                p >= 0 ->
-                    result.append(p)
+                persianIndex >= 0 ->
+                    result.append(
+                        persianIndex
+                    )
 
-                a >= 0 ->
-                    result.append(a)
+                arabicIndex >= 0 ->
+                    result.append(
+                        arabicIndex
+                    )
 
                 else ->
-                    result.append(char)
+                    result.append(ch)
             }
         }
 
         return result.toString()
     }
-
-    private fun containsWord(
-        text: String,
-        word: String
-    ): Boolean {
-
-        val escaped =
-            Regex.escape(word)
-
-        return Regex(
-            """(?<![\p{L}\p{N}])$escaped(?![\p{L}\p{N}])"""
-        ).containsMatchIn(text)
-    }
-
-    private fun containsPhrase(
-        text: String,
-        phrase: String
-    ): Boolean {
-        return text.contains(
-            phrase,
-            ignoreCase = false
-        )
-    }
-
-    private fun relativeDisplay(
-        offset: Int
-    ): String {
-
-        return when (offset) {
-            1 -> "فردا"
-            2 -> "پس‌فردا"
-            else -> "$offset روز دیگر"
-        }
-    }
-
-    /*
-     * Small internal tuple class because Kotlin does not provide
-     * Quadruple in the standard library.
-     */
-    private data class Quadruple<A, B, C, D>(
-        val first: A,
-        val second: B,
-        val third: C,
-        val fourth: D
-    )
 }
