@@ -321,129 +321,113 @@ object PersianNumberParser {
      *   هزار و دویست و سی
      */
     private fun parseComposite(
-        text: String
-    ): Int? {
+    text: String
+): Int? {
 
-        val words =
-            text.split(
-                Regex("\\s+")
-            )
-                .filter {
-                    it.isNotBlank()
-                }
-
-        if (words.isEmpty()) {
-            return null
+    val words =
+        text.split(
+            Regex("\\s+")
+        ).filter {
+            it.isNotBlank()
         }
 
-        var total = 0
-        var current = 0
-
-        var foundNumber = false
-
-        var index = 0
-
-        while (index < words.size) {
-
-            val word =
-                words[index]
-
-            /*
-             * "و" is only a connector.
-             */
-            if (word == "و") {
-                index++
-                continue
-            }
-
-            /*
-             * Units.
-             */
-            units[word]?.let {
-
-                current += it
-                foundNumber = true
-
-                index++
-                continue
-            }
-
-            /*
-             * Teens.
-             */
-            teens[word]?.let {
-
-                current += it
-                foundNumber = true
-
-                index++
-                continue
-            }
-
-            /*
-             * Tens.
-             */
-            tens[word]?.let {
-
-                current += it
-                foundNumber = true
-
-                index++
-                continue
-            }
-
-            /*
-             * Hundreds.
-             */
-            hundreds[word]?.let {
-
-                current += it
-                foundNumber = true
-
-                index++
-                continue
-            }
-
-            /*
-             * Large scales.
-             *
-             * Example:
-             *
-             * دو هزار
-             *
-             * current = 2
-             * scale = 1000
-             * result = 2000
-             */
-            scales[word]?.let { scale ->
-
-                if (current == 0) {
-                    current = 1
-                }
-
-                total +=
-                    current * scale
-
-                current = 0
-
-                foundNumber = true
-
-                index++
-                continue
-            }
-
-            /*
-             * Unknown word -> parsing failed.
-             */
-            return null
-        }
-
-        if (!foundNumber) {
-            return null
-        }
-
-        return total + current
+    if (words.isEmpty()) {
+        return null
     }
+
+    var total = 0
+    var current = 0
+
+    var foundNumber = false
+
+    for (word in words) {
+
+        // "و" فقط کلمه رابط است.
+        if (word == "و") {
+            continue
+        }
+
+        // واحدها
+        val unitValue =
+            units[word]
+
+        if (unitValue != null) {
+
+            current += unitValue
+            foundNumber = true
+
+            continue
+        }
+
+        // اعداد 10 تا 19
+        val teenValue =
+            teens[word]
+
+        if (teenValue != null) {
+
+            current += teenValue
+            foundNumber = true
+
+            continue
+        }
+
+        // دهگان
+        val tensValue =
+            tens[word]
+
+        if (tensValue != null) {
+
+            current += tensValue
+            foundNumber = true
+
+            continue
+        }
+
+        // صدگان
+        val hundredValue =
+            hundreds[word]
+
+        if (hundredValue != null) {
+
+            current += hundredValue
+            foundNumber = true
+
+            continue
+        }
+
+        // هزار، میلیون، میلیارد
+        val scaleValue =
+            scales[word]
+
+        if (scaleValue != null) {
+
+            if (current == 0) {
+                current = 1
+            }
+
+            total +=
+                current * scaleValue
+
+            current = 0
+
+            foundNumber = true
+
+            continue
+        }
+
+        /*
+         * اگر کلمه‌ای وجود داشته باشد که
+         * عدد نیست، کل عبارت را نامعتبر می‌کنیم.
+         */
+        return null
+    }
+
+    if (!foundNumber) {
+        return null
+    }
+
+    return total + current
+}
 
     // ---------------------------------------------------------------------
     // Utility methods for extractors
