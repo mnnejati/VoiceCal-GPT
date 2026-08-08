@@ -190,18 +190,7 @@ object PersianInfoExtractor {
         // 2. LOCATION
         // -------------------------------------------------------------
 
-        val location =
-            extractAfterKeyword(
-                normalized,
-                listOf(
-                    "در محل",
-                    "در آدرس",
-                    "در"
-                )
-            )
-                ?: extractLocationAfterGoVerb(
-                    normalized
-                )
+        val location = extractLocation(normalized)
 
         // -------------------------------------------------------------
         // 3. DATE
@@ -1152,25 +1141,376 @@ object PersianInfoExtractor {
     // LOCATION
     // =====================================================================
 
-    private fun extractLocationAfterGoVerb(
-        text: String
-    ): String? {
+// ========================================================================
+// LOCATION EXTRACTION
+// ========================================================================
 
-        val goVerbs =
-            listOf(
-                "می‌روم",
-                "میرم",
-                "برم",
-                "بروم",
-                "می‌رم"
+/**
+ * Common Persian location phrases.
+ *
+ * Longer phrases MUST be checked before their shorter components.
+ * For example:
+ *
+ *   "دفتر کار" before "دفتر"
+ *   "کنار خیابان" before "خیابان"
+ *   "داخل شعبه" before "شعبه"
+ */
+private val locationPhrases =
+    listOf(
+        // Multi-word locations
+        "کنار خیابان",
+        "داخل دفتر کار",
+        "دفتر کار",
+        "داخل دفتر",
+        "داخل شعبه",
+
+        // Medical
+        "درمونگاه",
+        "درمانگاه",
+        "کلینیک",
+        "مطب",
+        "بیمارستان",
+
+        // Public / commercial
+        "بانک",
+        "شعبه",
+        "شرکت",
+        "کارگاه",
+        "ساختمان",
+        "آپارتمان",
+
+        // Education
+        "کلاس",
+        "دانشگاه",
+        "مدرسه",
+
+        // Outdoor
+        "پارک",
+        "خیابان",
+        "باغ",
+        "ویلا",
+        "ساحل",
+        "کوه",
+
+        // Home
+        "خونه",
+        "خانه",
+
+        // Office
+        "دفتر"
+    )
+
+/**
+ * Colloquial location variants.
+ *
+ * The returned value is normalized so that:
+ *
+ *   درمونگاه -> درمانگاه
+ *   خونه     -> خانه
+ */
+private val locationNormalization =
+    mapOf(
+        "درمونگاه" to "درمانگاه",
+        "خونه" to "خانه"
+    )
+
+
+private fun extractLocation(
+    text: String
+): String? {
+
+    // ------------------------------------------------------------
+    // 1. Explicit location phrases
+    //
+    // Examples:
+    //
+    //   در پارک
+    //   در کلینیک
+    //   داخل دفتر
+    //   داخل شعبه
+    //   در دفتر کار
+    //   کنار خیابان
+    // ------------------------------------------------------------
+
+    val explicitPrefixes =
+        listOf(
+            "در محل",
+            "در آدرس",
+            "داخل",
+            "در"
+        )
+
+    for (prefix in explicitPrefixes) {
+
+        val prefixRegex =
+            Regex(
+                """(?:^|\s)${Regex.escape(prefix)}\s+(.+?)(?=\s+(?:با|ساعت|روز|فردا|پس‌فردا|امروز|قرار|نوبت|جلسه|دارم|خواهم|میرم|می‌روم|برم|بروم)\b|$)"""
             )
 
-        return extractAfterKeyword(
-            text,
-            goVerbs,
-            maxWords = 2
-        )
+        val match =
+            prefixRegex.find(text)
+
+        if (match != null) {
+
+            val candidate =
+                cleanLocationCandidate(
+                    match.groupValues[1]
+                )
+
+            if (candidate != null) {
+                return candidate
+            }
+        }
     }
+
+    // ------------------------------------------------------------
+    // 2. Direct known location phrase
+    //
+    // Example:
+    //
+    //   فردا پارک قرار دارم
+    //   فردا کلینیک میرم
+    // ------------------------------------------------------------
+
+    val directLocation =
+        findKnownLocationPhrase(text)
+
+    if (directLocation != null) {
+        return directLocation
+    }
+
+    // ------------------------------------------------------------
+    // 3. Location after a "go" verb
+    //
+    // Example:
+    //
+    //   فردا میرم خونه
+    //   پس فردا برم درمانگاه
+    //   ساعت پنج می‌روم دفتر کار
+    // ------------------------------------------------------------
+
+    return extractLocationAfterGoVerb(
+        text
+    )
+}
+
+
+/**
+ * Find a known location phrase anywhere in the sentence.
+ *
+ * Longer phrases are checked first.
+ */
+private fun findKnownLocationPhrase(
+    text: String
+): String? {
+
+    for (phrase in locationPhrases) {
+
+        val regex =
+            Regex(
+                """(?:^|\s)${Regex.escape(phrase)}(?=\s|$|[،,.])"""
+            )
+
+        if (regex.containsMatchIn(text)) {
+
+            return normalizeLocation(
+                phrase
+            )
+        }
+    }
+
+    return null
+}
+
+
+/**
+ * Extract location following a go-to verb.
+ */
+private fun extractLocationAfterGoVerb(
+    text: String
+): String? {
+
+    val goVerbs =
+        listOf(
+            "می‌روم",
+            "میروم",
+            "میرم",
+            "می‌رم",
+            "برم",
+            "بروم"
+        )
+
+    for (verb in goVerbs) {
+
+        val regex =
+            Regex(
+                """(?:^|\s)${Regex.escape(verb)}\s+(.+?)(?=\s+(?:با|ساعت|روز|فردا|پس‌فردا|امروز|قرار|نوبت|جلسه|دارم|خواهم)\b|$)"""
+            )
+
+        val match =
+            regex.find(text)
+
+        if (match != null) {
+
+            val candidate =
+                cleanLocationCandidate(
+                    match.groupValues[1]
+                )
+
+            if (candidate != null) {
+                return candidate
+            }
+        }
+    }
+
+    return null
+}
+
+
+/**
+ * Clean a possible location extracted from a sentence.
+ */
+private fun cleanLocationCandidate(
+    input: String
+): String? {
+
+    var value =
+        input.trim()
+
+    if (value.isEmpty()) {
+        return null
+    }
+
+    // Remove punctuation around the candidate.
+    value =
+        value.trim(
+            ',',
+            '.',
+            '،',
+            '؛',
+            ':',
+            ';',
+            '!',
+            '?',
+            '؟'
+        )
+
+    if (value.isEmpty()) {
+        return null
+    }
+
+    /*
+     * Try to find a known location inside the candidate.
+     *
+     * This is important for:
+     *
+     *   "کلینیک دکتر احمدی"
+     *
+     * where the location should be "کلینیک",
+     * not "کلینیک دکتر احمدی".
+     */
+    val known =
+        findKnownLocationPhrase(
+            value
+        )
+
+    if (known != null) {
+        return known
+    }
+
+    /*
+     * If there is no known keyword, keep the first meaningful
+     * one or two words, compatible with the previous extractor.
+     */
+    val stopWords =
+        setOf(
+            "با",
+            "ساعت",
+            "روز",
+            "فردا",
+            "امروز",
+            "پس‌فردا",
+            "قرار",
+            "نوبت",
+            "جلسه",
+            "دارم",
+            "خواهم",
+            "باید"
+        )
+
+    val words =
+        value.split(
+            Regex("\\s+")
+        )
+
+    val collected =
+        mutableListOf<String>()
+
+    for (word in words) {
+
+        val clean =
+            word.trim(
+                ',',
+                '.',
+                '،',
+                '؛',
+                ':',
+                ';'
+            )
+
+        if (clean.isEmpty()) {
+            continue
+        }
+
+        if (stopWords.contains(clean)) {
+            break
+        }
+
+        collected.add(clean)
+
+        /*
+         * Keep the old extractor conservative.
+         * We do not want a complete sentence to become a location.
+         */
+        if (collected.size >= 2) {
+            break
+        }
+    }
+
+    if (collected.isEmpty()) {
+        return null
+    }
+
+    return normalizeLocation(
+        collected.joinToString(" ")
+    )
+}
+
+
+/**
+ * Normalize common colloquial location names.
+ */
+private fun normalizeLocation(
+    location: String
+): String {
+
+    var result =
+        location.trim()
+
+    for ((from, to) in locationNormalization) {
+
+        result =
+            result.replace(
+                Regex(
+                    """\b${Regex.escape(from)}\b"""
+                ),
+                to
+            )
+    }
+
+    return result
+}
+
 
     // =====================================================================
     // SMALL INTERNAL DATA HOLDER
